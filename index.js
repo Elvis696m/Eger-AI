@@ -22,3 +22,14 @@ recognition.onerror = function(event) {
 micButton.onclick = function() {
     recognition.start();
 };
+let sendButton = document.getElementById("sendButton");
+
+sendButton.onclick = function() {
+    let message = userInput.value;
+
+    if (message.trim() === "") {
+        return;
+    }
+
+    console.log("User said:", message);
+};
