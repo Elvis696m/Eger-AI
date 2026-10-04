@@ -1,56 +1,47 @@
-
-body {
-    margin: 0;
-    padding: 0;
-    font-family: Arial, sans-serif;
-    background-color: #f5f7f9;
-}
-
-h1 {
-    background-color: aquamarine;
-    padding: 20px;
-    margin: 0;
-}
-
-/* Chat box container */
 .chat-box {
     position: relative;
     display: inline-block;
 }
 
-/* Chat input */
 .chat-input {
     width: 500px;
     height: 60px;
     font-size: 20px;
     border-radius: 30px;
     border: 1px solid #ccc;
-    padding: 0 60px 0 20px;
+    padding: 0 100px 0 20px;
     box-sizing: border-box;
     outline: none;
 }
 
-/* When the user clicks inside the chat box */
-.chat-input:focus {
-    border-color: #20b2aa;
-}
-
-/* Microphone button */
 #micButton {
     position: absolute;
-    right: 5px;
+    right: 45px;
     top: 50%;
     transform: translateY(-50%);
     border: none;
     background: transparent;
-    font-size: 25px;
+    font-size: 23px;
     cursor: pointer;
     z-index: 10;
-    padding: 5px;
 }
 
-/* Make the microphone slightly bigger when hovering */
-#micButton:hover {
-    font-size: 28px;
+#sendButton {
+    position: absolute;
+    right: 5px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 35px;
+    height: 35px;
+    border: none;
+    border-radius: 50%;
+    background-color: black;
+    color: white;
+    font-size: 22px;
+    cursor: pointer;
+    z-index: 10;
 }
 
+#sendButton:hover {
+    transform: translateY(-50%) scale(1.1);
+}
