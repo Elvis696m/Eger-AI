@@ -1,47 +1,129 @@
+body {
+    background-color: black;
+    color: white;
+    font-family: Arial, sans-serif;
+    text-align: center;
+}
+
+h1 {
+    margin-top: 50px;
+}
+
 .chat-box {
     position: relative;
     display: inline-block;
+    margin-top: 50px;
 }
 
 .chat-input {
     width: 500px;
     height: 60px;
     font-size: 20px;
+
     border-radius: 30px;
-    border: 1px solid #ccc;
+    border: 1px solid #555;
+
     padding: 0 100px 0 20px;
     box-sizing: border-box;
+
     outline: none;
 }
 
-#micButton {
-    position: absolute;
-    right: 45px;
-    top: 50%;
-    transform: translateY(-50%);
-    border: none;
-    background: transparent;
-    font-size: 23px;
-    cursor: pointer;
-    z-index: 10;
+.chat-input:focus {
+    border-color: aquamarine;
 }
 
+
+/* Microphone */
+#micButton {
+    position: absolute;
+
+    right: 45px;
+    top: 50%;
+
+    transform: translateY(-50%);
+
+    border: none;
+    background: transparent;
+
+    font-size: 23px;
+
+    cursor: pointer;
+}
+
+
+/* Send arrow */
 #sendButton {
     position: absolute;
+
     right: 5px;
     top: 50%;
+
     transform: translateY(-50%);
+
     width: 35px;
     height: 35px;
+
     border: none;
     border-radius: 50%;
-    background-color: black;
-    color: white;
+
+    background-color: white;
+    color: black;
+
     font-size: 22px;
+
     cursor: pointer;
-    z-index: 10;
 }
 
 #sendButton:hover {
     transform: translateY(-50%) scale(1.1);
+}
+
+
+/* Area below the chat box */
+#chatArea {
+    width: 500px;
+    margin: 30px auto;
+
+    text-align: left;
+}
+
+
+/* User question */
+.user-message {
+    background-color: #222;
+
+    color: white;
+
+    padding: 12px 16px;
+
+    border-radius: 15px;
+
+    margin-bottom: 15px;
+
+    width: fit-content;
+    max-width: 80%;
+
+    margin-left: auto;
+}
+
+
+/* Eger AI response */
+.ai-message {
+    background-color: #111;
+
+    color: white;
+
+    padding: 12px 16px;
+
+    border-radius: 15px;
+
+    margin-bottom: 20px;
+
+    width: fit-content;
+    max-width: 80%;
+
+    margin-right: auto;
+
+    border: 1px solid #333;
 }
