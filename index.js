@@ -56,15 +56,36 @@ sendButton.onclick = function() {
 
 
     /* Create Eger AI response */
+fetch("http://127.0.0.1:5000/ask", {
+    method: "POST",
+
+    headers: {
+        "Content-Type": "application/json"
+    },
+
+    body: JSON.stringify({
+        question: message
+    })
+})
+.then(response => response.json())
+.then(data => {
 
     let aiMessage = document.createElement("div");
 
     aiMessage.className = "ai-message";
 
-    aiMessage.textContent =
-        "Hello I'm Eger AI. How can I help you?: ";
+    aiMessage.textContent = data.answer;
 
     chatArea.appendChild(aiMessage);
+
+})
+.catch(error => {
+
+    console.log("Error:", error);
+
+});
+
+    
 
 
     /* Clear input */
