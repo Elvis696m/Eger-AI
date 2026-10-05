@@ -3,20 +3,37 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
     <title>Eger AI</title>
+
     <link rel="stylesheet" href="style.css">
 </head>
-<body align="center">
-    <h1 style="background-color: aquamarine;">WELCOME TO EGER AI</h1><br><br>
+
+<body>
+
+    <h1>WELCOME TO EGER AI</h1>
+
     <div class="chat-box">
-    <input type="text" id="userInput" class="chat-input"
-        placeholder="Ask anything"
-        style="width:500px; height:60px; font-size:20px;">
 
-    <button id="micButton" type="button">🎤</button>
-    <button id="sendButton" type="button">↑</button>
-</div>
+        <input
+            type="text"
+            id="userInput"
+            class="chat-input"
+            placeholder="Ask anything"
+        >
 
-<script src="index.js"></script>
+        <button id="micButton" type="button">🎤</button>
+
+        <button id="sendButton" type="button">↑</button>
+
+    </div>
+
+
+    <!-- AI responses will appear here -->
+    <div id="chatArea"></div>
+
+
+    <script src="index.js"></script>
+
 </body>
 </html>
