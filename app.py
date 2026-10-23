@@ -30,7 +30,9 @@ class Knowledge(db.Model):
 with app.app_context():
     db.create_all()
 
-
+with app.app_context():
+    print("DATABASE PATH:", db.engine.url)
+    print("KNOWLEDGE RECORDS:", Knowledge.query.count())
 # =========================
 # TEXT CLEANING
 # =========================
