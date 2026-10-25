@@ -6,103 +6,40 @@ const API_URL = "https://eger-ai.onrender.com";
 
 
 // ==================================================
-// GET ADMIN PASSWORD
-// ==================================================
-// ==================================================
-// GET ADMIN PASSWORD USING CUSTOM DIALOG
+// GET ADMIN PASSWORD USING NORMAL PROMPT
 // ==================================================
 
 function getAdminPassword() {
-    return new Promise((resolve) => {
-        const dialog = document.getElementById("passwordDialog");
-        const passwordInput = document.getElementById("adminPasswordInput");
-        const confirmButton = document.getElementById("confirmPasswordButton");
-        const cancelButton = document.getElementById("cancelPasswordButton");
+    const password = prompt(
+        "Enter your Eger AI administrator password:"
+    );
 
-        if (!dialog || !passwordInput || !confirmButton || !cancelButton) {
-            resolve(null);
-            return;
-        }
-
-        passwordInput.value = "";
-        dialog.style.display = "flex";
-        passwordInput.focus();
-
-        function cleanup(password) {
-            dialog.style.display = "none";
-
-            confirmButton.removeEventListener("click", confirm);
-            cancelButton.removeEventListener("click", cancel);
-            passwordInput.removeEventListener("keydown", handleEnter);
-
-            resolve(password);
-        }
-
-        function confirm() {
-            const password = passwordInput.value;
-
-            if (!password) {
-                alertMessage("Please enter your administrator password.");
-                passwordInput.focus();
-                return;
-            }
-
-            cleanup(password);
-        }
-
-        function cancel() {
-            cleanup(null);
-        }
-
-        function handleEnter(event) {
-            if (event.key === "Enter") {
-                event.preventDefault();
-                confirm();
-            }
-
-            if (event.key === "Escape") {
-                cancel();
-            }
-        }
-
-        confirmButton.addEventListener("click", confirm);
-        cancelButton.addEventListener("click", cancel);
-        passwordInput.addEventListener("keydown", handleEnter);
-    });
-}
-
-// Display a message without relying on alert().
-function alertMessage(message) {
-    const messageElement = document.getElementById("uploadMessage");
-
-    if (messageElement) {
-        messageElement.textContent = message;
+    if (password === null || password.length === 0) {
+        return null;
     }
+
+    return password;
 }
+
 
 // ==================================================
 // READ SERVER RESPONSE SAFELY
 // ==================================================
 
 async function readResponse(response) {
-
     const responseText = await response.text();
 
     let data;
 
     try {
-
         data = JSON.parse(responseText);
-
     } catch {
-
         data = {
             error: responseText || "Unexpected server response."
         };
     }
 
     if (!response.ok) {
-
         throw new Error(
             data.error ||
             data.message ||
@@ -118,127 +55,95 @@ async function readResponse(response) {
 // 1. MANUAL KNOWLEDGE FORM
 // ==================================================
 
-const knowledgeForm = document.getElementById(
-    "knowledgeForm"
-);
+const knowledgeForm = document.getElementById("knowledgeForm");
 
-const questionInput = document.getElementById(
-    "question"
-);
+const questionInput = document.getElementById("question");
 
-const keywordsInput = document.getElementById(
-    "keywords"
-);
+const keywordsInput = document.getElementById("keywords");
 
-const answerInput = document.getElementById(
-    "answer"
-);
+const answerInput = document.getElementById("answer");
 
-const addButton = document.getElementById(
-    "addButton"
-);
+const addButton = document.getElementById("addButton");
 
-const knowledgeMessage = document.getElementById(
-    "knowledgeMessage"
-);
+const knowledgeMessage = document.getElementById("knowledgeMessage");
 
 
 if (knowledgeForm) {
+    knowledgeForm.addEventListener("submit", async function (event) {
+        event.preventDefault();
 
-    knowledgeForm.addEventListener(
-        "submit",
-        async function (event) {
+        const question = questionInput.value.trim();
+        const keywords = keywordsInput.value.trim();
+        const answer = answerInput.value.trim();
 
-            event.preventDefault();
+        // Validate form fields.
 
-            const question = questionInput.value.trim();
+        if (!question || !keywords || !answer) {
+            knowledgeMessage.textContent =
+                "Please fill in all fields.";
 
-            const keywords = keywordsInput.value.trim();
+            return;
+        }
 
-            const answer = answerInput.value.trim();
+        // Ask for the administrator password.
 
+        const adminPassword = getAdminPassword();
 
-            // Validate form fields.
+        if (adminPassword === null || adminPassword.length === 0) {
+            knowledgeMessage.textContent =
+                "Action cancelled.";
 
-            if (!question || !keywords || !answer) {
+            return;
+        }
 
-                knowledgeMessage.textContent =
-                    "Please fill in all fields.";
+        addButton.disabled = true;
+        addButton.textContent = "ADDING KNOWLEDGE...";
 
-                return;
-            }
+        knowledgeMessage.textContent =
+            "Saving information...";
 
+        try {
+            const response = await fetch(
+                `${API_URL}/add`,
+                {
+                    method: "POST",
 
-            // Ask for the administrator password.
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${adminPassword}`
+                    },
 
-            const adminPassword = getAdminPassword();
+                    body: JSON.stringify({
+                        question,
+                        keywords,
+                        answer
+                    })
+                }
+            );
 
-            if (adminPassword === null) {
-
-                knowledgeMessage.textContent =
-                    "Action cancelled.";
-
-                return;
-            }
-
-
-            addButton.disabled = true;
-
-            addButton.textContent = "ADDING KNOWLEDGE...";
+            const data = await readResponse(response);
 
             knowledgeMessage.textContent =
-                "Saving information...";
+                data.message ||
+                "Knowledge added successfully!";
 
+            knowledgeForm.reset();
 
-            try {
+        } catch (error) {
+            console.error(
+                "Knowledge submission error:",
+                error
+            );
 
-                const response = await fetch(
-                    `${API_URL}/add`,
-                    {
-                        method: "POST",
+            knowledgeMessage.textContent =
+                "Failed to add knowledge: " +
+                error.message;
 
-                        headers: {
-                            "Content-Type": "application/json",
-                            "Authorization": `Bearer ${adminPassword}`
-                        },
-
-                        body: JSON.stringify({
-                            question,
-                            keywords,
-                            answer
-                        })
-                    }
-                );
-
-
-                const data = await readResponse(response);
-
-
-                knowledgeMessage.textContent =
-                    data.message ||
-                    "Knowledge added successfully!";
-
-                knowledgeForm.reset();
-
-            } catch (error) {
-
-                console.error(
-                    "Knowledge submission error:",
-                    error
-                );
-
-                knowledgeMessage.textContent =
-                    "Failed to add knowledge: " +
-                    error.message;
-
-            } finally {
-
-                addButton.disabled = false;
-
-                addButton.textContent = "ADD KNOWLEDGE";
-            }
+        } finally {
+            addButton.disabled = false;
+            addButton.textContent = "ADD KNOWLEDGE";
         }
-    );
+    });
 }
 
 
@@ -246,168 +151,128 @@ if (knowledgeForm) {
 // 2. DOCUMENT UPLOAD FORM
 // ==================================================
 
-const uploadForm = document.getElementById(
-    "uploadForm"
-);
+const uploadForm = document.getElementById("uploadForm");
 
-const titleInput = document.getElementById(
-    "title"
-);
+const titleInput = document.getElementById("title");
 
-const categoryInput = document.getElementById(
-    "category"
-);
+const categoryInput = document.getElementById("category");
 
-const documentInput = document.getElementById(
-    "document"
-);
+const documentInput = document.getElementById("document");
 
-const uploadButton = document.getElementById(
-    "uploadButton"
-);
+const uploadButton = document.getElementById("uploadButton");
 
-const uploadMessage = document.getElementById(
-    "uploadMessage"
-);
+const uploadMessage = document.getElementById("uploadMessage");
 
 
 if (uploadForm) {
+    uploadForm.addEventListener("submit", async function (event) {
+        event.preventDefault();
 
-    uploadForm.addEventListener(
-        "submit",
-        async function (event) {
+        const title = titleInput.value.trim();
+        const category = categoryInput.value;
+        const file = documentInput.files[0];
 
-            event.preventDefault();
+        // Validate the form.
 
-            const title = titleInput.value.trim();
+        if (!title || !category || !file) {
+            uploadMessage.textContent =
+                "Please complete all fields.";
 
-            const category = categoryInput.value;
+            return;
+        }
 
-            const file = documentInput.files[0];
+        // Check file extension.
 
+        const allowedExtensions = [
+            ".pdf",
+            ".docx",
+            ".txt"
+        ];
 
-            // Validate the form.
+        const fileName = file.name.toLowerCase();
 
-            if (!title || !category || !file) {
+        const validExtension = allowedExtensions.some(
+            extension => fileName.endsWith(extension)
+        );
 
-                uploadMessage.textContent =
-                    "Please complete all fields.";
+        if (!validExtension) {
+            uploadMessage.textContent =
+                "Please select a PDF, DOCX, or TXT document.";
 
-                return;
-            }
+            return;
+        }
 
+        // Enforce a 10 MB client-side size limit.
 
-            // Check file extension.
+        const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
-            const allowedExtensions = [
-                ".pdf",
-                ".docx",
-                ".txt"
-            ];
+        if (file.size > MAX_FILE_SIZE) {
+            uploadMessage.textContent =
+                "The file is too large. Maximum size is 10 MB.";
 
-            const fileName = file.name.toLowerCase();
+            return;
+        }
 
-            const validExtension = allowedExtensions.some(
-                extension => fileName.endsWith(extension)
+        // Ask for the administrator password.
+
+        const adminPassword = getAdminPassword();
+
+        if (adminPassword === null || adminPassword.length === 0) {
+            uploadMessage.textContent =
+                "Upload cancelled.";
+
+            return;
+        }
+
+        // Prepare the multipart form data.
+
+        const formData = new FormData();
+
+        formData.append("title", title);
+        formData.append("category", category);
+        formData.append("document", file);
+
+        uploadButton.disabled = true;
+        uploadButton.textContent = "UPLOADING...";
+
+        uploadMessage.textContent =
+            "Uploading and processing document...";
+
+        try {
+            const response = await fetch(
+                `${API_URL}/upload`,
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Authorization": `Bearer ${adminPassword}`
+                    },
+
+                    body: formData
+                }
             );
 
-
-            if (!validExtension) {
-
-                uploadMessage.textContent =
-                    "Please select a PDF, DOCX, or TXT document.";
-
-                return;
-            }
-
-
-            // Enforce a 10 MB client-side size limit.
-
-            const MAX_FILE_SIZE = 10 * 1024 * 1024;
-
-            if (file.size > MAX_FILE_SIZE) {
-
-                uploadMessage.textContent =
-                    "The file is too large. Maximum size is 10 MB.";
-
-                return;
-            }
-
-
-            // Ask for the administrator password.
-
-            const adminPassword = getAdminPassword();
-
-            if (adminPassword === null) {
-
-                uploadMessage.textContent =
-                    "Upload cancelled.";
-
-                return;
-            }
-
-
-            // Prepare the multipart form data.
-
-            const formData = new FormData();
-
-            formData.append("title", title);
-
-            formData.append("category", category);
-
-            formData.append("document", file);
-
-
-            uploadButton.disabled = true;
-
-            uploadButton.textContent = "UPLOADING...";
+            const data = await readResponse(response);
 
             uploadMessage.textContent =
-                "Uploading and processing document...";
+                `${data.message || "Document uploaded successfully!"} ` +
+                `Extracted ${data.characters_extracted ?? 0} characters.`;
 
+            uploadForm.reset();
 
-            try {
+        } catch (error) {
+            console.error(
+                "Document upload error:",
+                error
+            );
 
-                const response = await fetch(
-                    `${API_URL}/upload`,
-                    {
-                        method: "POST",
+            uploadMessage.textContent =
+                "Upload failed: " +
+                error.message;
 
-                        headers: {
-                            "Authorization": `Bearer ${adminPassword}`
-                        },
-
-                        body: formData
-                    }
-                );
-
-
-                const data = await readResponse(response);
-
-
-                uploadMessage.textContent =
-                    `${data.message} ` +
-                    `Extracted ${data.characters_extracted} characters.`;
-
-                uploadForm.reset();
-
-            } catch (error) {
-
-                console.error(
-                    "Document upload error:",
-                    error
-                );
-
-                uploadMessage.textContent =
-                    "Upload failed: " +
-                    error.message;
-
-            } finally {
-
-                uploadButton.disabled = false;
-
-                uploadButton.textContent = "UPLOAD DOCUMENT";
-            }
+        } finally {
+            uploadButton.disabled = false;
+            uploadButton.textContent = "UPLOAD DOCUMENT";
         }
-    );
+    });
 }
