@@ -1,30 +1,46 @@
-
 import os
 import re
+import hmac
+
+from io import BytesIO
+from pathlib import Path
+from functools import wraps
 
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
-from flask_cors import CORS, cross_origin
+from flask_cors import CORS
+from werkzeug.utils import secure_filename
+
+from pypdf import PdfReader
+from docx import Document as WordDocument
 
 
-# =========================
-# FLASK APPLICATION
-# =========================
+# ==================================================
+# 1. FLASK CONFIGURATION
+# ==================================================
 
 app = Flask(__name__)
+
 CORS(app)
 
-
-# =========================
-# DATABASE CONFIGURATION
-# =========================
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
-INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
-os.makedirs(INSTANCE_DIR, exist_ok=True)
+INSTANCE_DIR = os.path.join(
+    BASE_DIR,
+    "instance"
+)
 
-DATABASE_PATH = os.path.join(INSTANCE_DIR, "egerai.db")
+os.makedirs(
+    INSTANCE_DIR,
+    exist_ok=True
+)
+
+DATABASE_PATH = os.path.join(
+    INSTANCE_DIR,
+    "egerai.db"
+)
 
 app.config["SQLALCHEMY_DATABASE_URI"] = (
     "sqlite:///" + DATABASE_PATH.replace("\\", "/")
@@ -35,272 +51,690 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 
 
-# =========================
-# KNOWLEDGE TABLE
-# =========================
+# ==================================================
+# 2. ADMIN AUTHENTICATION
+# ==================================================
+
+def admin_required(route_function):
+
+    @wraps(route_function)
+    def wrapper(*args, **kwargs):
+
+        # Allow browser CORS preflight requests.
+        if request.method == "OPTIONS":
+            return route_function(*args, **kwargs)
+
+        # Read the secret from Render's environment.
+        admin_password = os.environ.get(
+            "ADMIN_PASSWORD"
+        )
+
+        # Fail closed if the password is missing.
+        if not admin_password:
+
+            app.logger.error(
+                "ADMIN_PASSWORD is not configured."
+            )
+
+            return jsonify({
+                "error": (
+                    "Administrator authentication "
+                    "is not configured."
+                )
+            }), 503
+
+        authorization = request.headers.get(
+            "Authorization",
+            ""
+        )
+
+        supplied_password = ""
+
+        if authorization.startswith("Bearer "):
+
+            supplied_password = authorization[
+                len("Bearer "):
+            ]
+
+        # Compare passwords without ordinary string comparison.
+        if not hmac.compare_digest(
+            supplied_password,
+            admin_password
+        ):
+
+            return jsonify({
+                "error": (
+                    "Unauthorized. A valid administrator "
+                    "password is required."
+                )
+            }), 401
+
+        return route_function(
+            *args,
+            **kwargs
+        )
+
+    return wrapper
+
+
+# ==================================================
+# 3. KNOWLEDGE DATABASE MODEL
+# ==================================================
 
 class Knowledge(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    question = db.Column(db.String(200), nullable=False)
-    keywords = db.Column(db.String(500), nullable=False)
-    answer = db.Column(db.Text, nullable=False)
+
+    __tablename__ = "knowledge"
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True
+    )
+
+    question = db.Column(
+        db.String(200),
+        nullable=False
+    )
+
+    keywords = db.Column(
+        db.String(500),
+        nullable=False
+    )
+
+    answer = db.Column(
+        db.Text,
+        nullable=False
+    )
 
 
-# =========================
-# DATABASE INITIALIZATION
-# =========================
+# ==================================================
+# 4. DOCUMENT DATABASE MODEL
+# ==================================================
+
+class Document(db.Model):
+
+    __tablename__ = "documents"
+
+    id = db.Column(
+        db.Integer,
+        primary_key=True
+    )
+
+    title = db.Column(
+        db.String(200),
+        nullable=False
+    )
+
+    category = db.Column(
+        db.String(100),
+        nullable=False
+    )
+
+    filename = db.Column(
+        db.String(255),
+        nullable=False
+    )
+
+    extracted_text = db.Column(
+        db.Text,
+        nullable=False
+    )
+
+    uploaded_at = db.Column(
+        db.DateTime,
+        server_default=db.func.current_timestamp()
+    )
+
+
+# ==================================================
+# 5. INITIALIZE THE DATABASE
+# ==================================================
 
 with app.app_context():
+
     db.create_all()
 
-    print("DATABASE PATH:", db.engine.url)
-    print("KNOWLEDGE RECORDS:", Knowledge.query.count())
+    print("====================================")
+    print("EGER AI DATABASE INITIALIZED")
+    print("====================================")
+
+    print(
+        "Knowledge records:",
+        Knowledge.query.count()
+    )
+
+    print(
+        "Stored documents:",
+        Document.query.count()
+    )
 
 
-# =========================
-# TEXT CLEANING
-# =========================
+# ==================================================
+# 6. CLEAN TEXT FOR QUESTION MATCHING
+# ==================================================
 
 def clean_text(text):
+
     text = text.lower()
 
-    replacements = {
-        "didn't": "did not",
-        "didnt": "did not",
-        "doesn't": "does not",
-        "doesnt": "does not",
-        "don't": "do not",
-        "dont": "do not",
-        "can't": "cannot",
-        "cant": "cannot",
-        "i'm": "i am",
-        "im": "i am",
-        "what's": "what is",
-        "whats": "what is"
-    }
+    text = re.sub(
+        r"[^a-z0-9\s]",
+        " ",
+        text
+    )
 
-    for old, new in replacements.items():
-        text = text.replace(old, new)
+    text = re.sub(
+        r"\s+",
+        " ",
+        text
+    )
 
-    text = re.sub(r"[^a-zA-Z0-9\s]", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-
-    return text
+    return text.strip()
 
 
-# =========================
-# HOME
-# =========================
+# ==================================================
+# 7. HOME ROUTE
+# ==================================================
 
-@app.route("/")
+@app.route("/", methods=["GET"])
 def home():
-    return "Eger AI Flask server is working!"
+
+    return jsonify({
+        "message": "Eger AI Flask server is working!",
+        "status": "online"
+    })
 
 
-# =========================
-# ASK EGER AI
-# =========================
+# ==================================================
+# 8. ASK EGER AI
+# ==================================================
 
-@app.route("/ask", methods=["POST"])
-@cross_origin()
+@app.route("/ask", methods=["POST", "OPTIONS"])
 def ask():
 
-    data = request.get_json(silent=True)
+    if request.method == "OPTIONS":
+        return "", 204
 
-    if not data or "question" not in data:
+    data = request.get_json(
+        silent=True
+    ) or {}
+
+    user_question = data.get(
+        "question",
+        ""
+    )
+
+    if not isinstance(user_question, str):
+
         return jsonify({
-            "answer": "Please ask me a question."
+            "error": "Question must be text."
         }), 400
 
-    user_question = clean_text(str(data["question"]))
+    user_question = user_question.strip()
 
     if not user_question:
+
         return jsonify({
-            "answer": "Please ask me a question."
+            "error": "Please provide a question."
         }), 400
 
-    # Words that normally don't identify the topic
-    stop_words = {
-        "what", "is", "are", "the", "a", "an", "of",
-        "do", "does", "did", "tell", "me", "about",
-        "can", "you", "please", "explain", "define",
-        "give", "information", "on", "to", "for", "and",
-        "in", "how", "why", "where", "when", "who",
-        "i", "my", "this", "that", "will", "would",
-        "could", "should"
-    }
+    cleaned_question = clean_text(
+        user_question
+    )
 
-    user_words = [
-        word
-        for word in user_question.split()
-        if word not in stop_words
-    ]
+    question_words = set(
+        cleaned_question.split()
+    )
 
-    knowledge_items = Knowledge.query.all()
+    best_answer = None
+    highest_score = 0
 
-    best_match = None
-    best_score = 0
+    knowledge_records = Knowledge.query.all()
 
-    # =========================
-    # MATCH EACH KNOWLEDGE ITEM
-    # =========================
+    for item in knowledge_records:
 
-    for knowledge in knowledge_items:
+        stored_question = clean_text(
+            item.question
+        )
 
-        score = 0
+        stored_keywords = clean_text(
+            item.keywords
+        )
 
-        stored_question = clean_text(knowledge.question)
+        stored_question_words = set(
+            stored_question.split()
+        )
 
-        # 1. EXACT QUESTION
-        if user_question == stored_question:
-            score += 100
+        stored_keyword_words = set(
+            stored_keywords.split()
+        )
 
-        # 2. KEYWORD PHRASES
-        raw_keywords = knowledge.keywords.split(",")
+        # Compare question words.
+        question_matches = len(
+            question_words & stored_question_words
+        )
 
-        keyword_phrases = []
+        # Compare keyword words.
+        keyword_matches = len(
+            question_words & stored_keyword_words
+        )
 
-        for keyword in raw_keywords:
-            keyword = clean_text(keyword)
+        score = (
+            question_matches * 2
+            + keyword_matches * 3
+        )
 
-            if keyword:
-                keyword_phrases.append(keyword)
+        # Give a bonus for a complete phrase match.
+        if (
+            stored_question
+            and stored_question in cleaned_question
+        ):
 
-        for keyword in keyword_phrases:
+            score += 5
 
-            keyword_words = keyword.split()
+        if score > highest_score:
 
-            # Exact phrase appears in user's question
-            if keyword in user_question:
-                score += 20
-                score += len(keyword_words) * 5
+            highest_score = score
 
-            # Individual keyword words
-            matching_words = 0
+            best_answer = item.answer
 
-            for word in keyword_words:
-                if word in user_words:
-                    matching_words += 1
+    if best_answer and highest_score >= 5:
 
-            if matching_words > 0:
-                score += matching_words * 3
-
-                if matching_words == len(keyword_words):
-                    score += 10
-
-        # 3. STORED QUESTION MATCHING
-        stored_question_words = set(stored_question.split())
-
-        matching_question_words = 0
-
-        for word in user_words:
-            if word in stored_question_words:
-                matching_question_words += 1
-
-        score += matching_question_words * 2
-
-        # 4. SPECIAL PROTECTION: RESIT
-        if "resit" in user_words:
-
-            if (
-                "resit" in stored_question
-                or "resit" in knowledge.keywords.lower()
-            ):
-                score += 30
-            else:
-                score -= 15
-
-        # 5. SPECIAL PROTECTION: CAT
-        if "cat" in user_words:
-
-            if (
-                "cat" in stored_question
-                or "cat" in knowledge.keywords.lower()
-            ):
-                score += 30
-            else:
-                score -= 10
-
-        # 6. EXAM MATCHING
-        if "exam" in user_words:
-            if "exam" in stored_question:
-                score += 5
-
-        # 7. SAVE BEST MATCH
-        if score > best_score:
-            best_score = score
-            best_match = knowledge
-
-    # =========================
-    # RETURN ANSWER
-    # =========================
-
-    if best_match and best_score >= 5:
         return jsonify({
-            "answer": best_match.answer
+            "answer": best_answer,
+            "status": "success"
         })
 
     return jsonify({
         "answer": (
-            "I don't know that yet. "
-            "My knowledge base is still being built."
-        )
+            "I'm sorry, I don't have enough information "
+            "to answer that question yet. Please contact "
+            "the relevant Egerton University office or "
+            "try asking in a different way."
+        ),
+        "status": "not_found"
     })
 
 
-# =========================
-# ADD KNOWLEDGE
-# =========================
+# ==================================================
+# 9. ADD KNOWLEDGE
+# ADMIN PASSWORD REQUIRED
+# ==================================================
 
 @app.route("/add", methods=["POST", "OPTIONS"])
-@cross_origin()
+@admin_required
 def add_knowledge():
 
     if request.method == "OPTIONS":
         return "", 204
 
-    data = request.get_json(silent=True)
+    data = request.get_json(
+        silent=True
+    ) or {}
 
-    if not data:
+    question = data.get(
+        "question",
+        ""
+    )
+
+    keywords = data.get(
+        "keywords",
+        ""
+    )
+
+    answer = data.get(
+        "answer",
+        ""
+    )
+
+    # Validate field types.
+    if not all(
+        isinstance(value, str)
+        for value in (question, keywords, answer)
+    ):
+
         return jsonify({
-            "message": "No data received."
+            "error": "All fields must contain text."
         }), 400
 
-    if (
-        "question" not in data
-        or "keywords" not in data
-        or "answer" not in data
-    ):
+    question = question.strip()
+    keywords = keywords.strip()
+    answer = answer.strip()
+
+    if not question or not keywords or not answer:
+
         return jsonify({
-            "message": (
-                "question, keywords and answer are required."
+            "error": (
+                "Question, keywords, and answer "
+                "are all required."
             )
         }), 400
 
-    new_knowledge = Knowledge(
-        question=data["question"],
-        keywords=data["keywords"],
-        answer=data["answer"]
+    if len(question) > 200:
+
+        return jsonify({
+            "error": (
+                "Question must not exceed "
+                "200 characters."
+            )
+        }), 400
+
+    if len(keywords) > 500:
+
+        return jsonify({
+            "error": (
+                "Keywords must not exceed "
+                "500 characters."
+            )
+        }), 400
+
+    try:
+
+        new_knowledge = Knowledge(
+            question=question,
+            keywords=keywords,
+            answer=answer
+        )
+
+        db.session.add(
+            new_knowledge
+        )
+
+        db.session.commit()
+
+        return jsonify({
+            "message": "Knowledge added successfully!",
+            "id": new_knowledge.id
+        }), 201
+
+    except Exception:
+
+        db.session.rollback()
+
+        app.logger.exception(
+            "Failed to save knowledge."
+        )
+
+        return jsonify({
+            "error": "Failed to save knowledge."
+        }), 500
+
+
+# ==================================================
+# 10. EXTRACT PDF TEXT
+# ==================================================
+
+def extract_pdf_text(file_bytes):
+
+    pdf = PdfReader(
+        BytesIO(file_bytes)
     )
 
-    db.session.add(new_knowledge)
-    db.session.commit()
+    if pdf.is_encrypted:
+
+        raise ValueError(
+            "This PDF is password-protected."
+        )
+
+    extracted_pages = []
+
+    for page in pdf.pages:
+
+        page_text = page.extract_text() or ""
+
+        if page_text.strip():
+
+            extracted_pages.append(
+                page_text
+            )
+
+    return "\n".join(
+        extracted_pages
+    )
+
+
+# ==================================================
+# 11. EXTRACT DOCX TEXT
+# ==================================================
+
+def extract_docx_text(file_bytes):
+
+    document = WordDocument(
+        BytesIO(file_bytes)
+    )
+
+    extracted_parts = []
+
+    # Extract paragraphs.
+    for paragraph in document.paragraphs:
+
+        if paragraph.text.strip():
+
+            extracted_parts.append(
+                paragraph.text
+            )
+
+    # Extract table contents.
+    for table in document.tables:
+
+        for row in table.rows:
+
+            row_text = " | ".join(
+                cell.text.strip()
+                for cell in row.cells
+            )
+
+            if row_text.strip():
+
+                extracted_parts.append(
+                    row_text
+                )
+
+    return "\n".join(
+        extracted_parts
+    )
+
+
+# ==================================================
+# 12. EXTRACT TXT TEXT
+# ==================================================
+
+def extract_txt_text(file_bytes):
+
+    return file_bytes.decode(
+        "utf-8-sig"
+    )
+
+
+# ==================================================
+# 13. UPLOAD UNIVERSITY DOCUMENT
+# ADMIN PASSWORD REQUIRED
+# ==================================================
+
+@app.route("/upload", methods=["POST", "OPTIONS"])
+@admin_required
+def upload_document():
+
+    if request.method == "OPTIONS":
+        return "", 204
+
+    title = request.form.get(
+        "title",
+        ""
+    ).strip()
+
+    category = request.form.get(
+        "category",
+        ""
+    ).strip()
+
+    uploaded_file = request.files.get(
+        "document"
+    )
+
+    if (
+        not title
+        or not category
+        or not uploaded_file
+    ):
+
+        return jsonify({
+            "error": (
+                "Title, category, and document "
+                "are all required."
+            )
+        }), 400
+
+    if len(title) > 200:
+
+        return jsonify({
+            "error": (
+                "Title must not exceed "
+                "200 characters."
+            )
+        }), 400
+
+    original_filename = secure_filename(
+        uploaded_file.filename or ""
+    )
+
+    if not original_filename:
+
+        return jsonify({
+            "error": "Please select a valid filename."
+        }), 400
+
+    extension = Path(
+        original_filename
+    ).suffix.lower()
+
+    allowed_extensions = {
+        ".pdf",
+        ".docx",
+        ".txt"
+    }
+
+    if extension not in allowed_extensions:
+
+        return jsonify({
+            "error": (
+                "Only PDF, DOCX, and TXT "
+                "files are supported."
+            )
+        }), 400
+
+    try:
+
+        file_bytes = uploaded_file.read()
+
+        if not file_bytes:
+
+            return jsonify({
+                "error": "The uploaded file is empty."
+            }), 400
+
+        # Extract text according to the file extension.
+        if extension == ".pdf":
+
+            extracted_text = extract_pdf_text(
+                file_bytes
+            )
+
+        elif extension == ".docx":
+
+            extracted_text = extract_docx_text(
+                file_bytes
+            )
+
+        else:
+
+            extracted_text = extract_txt_text(
+                file_bytes
+            )
+
+        extracted_text = extracted_text.strip()
+
+        if not extracted_text:
+
+            return jsonify({
+                "error": (
+                    "No readable text was found. "
+                    "Scanned PDFs may require OCR."
+                )
+            }), 400
+
+        # Save extracted text and document metadata.
+        # This does not save the original file itself.
+
+        new_document = Document(
+            title=title,
+            category=category,
+            filename=original_filename,
+            extracted_text=extracted_text
+        )
+
+        db.session.add(
+            new_document
+        )
+
+        db.session.commit()
+
+        return jsonify({
+            "message": (
+                "Document text extracted "
+                "and saved successfully!"
+            ),
+            "document_id": new_document.id,
+            "title": new_document.title,
+            "category": new_document.category,
+            "characters_extracted": len(extracted_text)
+        }), 201
+
+    except ValueError as error:
+
+        db.session.rollback()
+
+        return jsonify({
+            "error": str(error)
+        }), 400
+
+    except Exception:
+
+        db.session.rollback()
+
+        app.logger.exception(
+            "Document upload failed."
+        )
+
+        return jsonify({
+            "error": (
+                "The document could not be processed. "
+                "Check the file and try again."
+            )
+        }), 500
+
+
+# ==================================================
+# 14. FILE SIZE ERROR
+# ==================================================
+
+@app.errorhandler(413)
+def file_too_large(error):
 
     return jsonify({
-        "message": "Knowledge added successfully",
-        "id": new_knowledge.id
-    })
+        "error": (
+            "File too large. Maximum size is 10 MB."
+        )
+    }), 413
 
 
-# =========================
-# START SERVER
-# =========================
+# ==================================================
+# 15. RUN THE APPLICATION LOCALLY
+# ==================================================
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(
-        host="0.0.0.0",
-        port=port,
-        debug=False
-    )
 
+    app.run(
+        host="127.0.0.1",
+        port=5000,
+        debug=True
+    )

@@ -1,73 +1,305 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-
     <meta charset="UTF-8">
-
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>Eger AI Admin</title>
+    <title>Eger AI | Admin Dashboard</title>
 
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 25px;
+            font-family: Arial, sans-serif;
+            background: #0f172a;
+            color: #f8fafc;
+        }
+
+        .container {
+            max-width: 850px;
+            margin: 0 auto;
+        }
+
+        header {
+            margin-bottom: 30px;
+        }
+
+        header h1 {
+            margin-bottom: 8px;
+            color: #38bdf8;
+        }
+
+        header p {
+            color: #cbd5e1;
+            line-height: 1.6;
+        }
+
+        .card {
+            background: #1e293b;
+            padding: 25px;
+            margin-bottom: 25px;
+            border-radius: 30px;
+            border: 1px solid #334155;
+        }
+
+        .card h2 {
+            margin-top: 0;
+            color: #38bdf8;
+        }
+
+        .description {
+            color: #cbd5e1;
+            line-height: 1.5;
+        }
+
+        label {
+            display: block;
+            margin-top: 18px;
+            margin-bottom: 7px;
+            font-weight: bold;
+        }
+
+        input,
+        textarea,
+        select {
+            width: 100%;
+            padding: 12px;
+            border-radius: 30px;
+            border: 1px solid #475569;
+            background: #0f172a;
+            color: white;
+            font-size: 15px;
+        }
+
+        textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+
+        input[type="file"] {
+            padding: 10px;
+        }
+
+        button {
+            width: 100%;
+            padding: 14px;
+            margin-top: 22px;
+            border: none;
+            border-radius: 6px;
+            background: #0284c7;
+            color: white;
+            font-size: 15px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #0369a1;
+        }
+
+        button:disabled {
+            background: #64748b;
+            cursor: not-allowed;
+        }
+
+        .message {
+            margin-top: 15px;
+            overflow-wrap: anywhere;
+            line-height: 1.5;
+        }
+
+        footer {
+            text-align: center;
+            color: #94a3b8;
+            margin-top: 35px;
+        }
+
+        @media (max-width: 600px) {
+            body {
+                padding: 15px;
+            }
+
+            .card {
+                padding: 18px;
+            }
+        }
+    </style>
 </head>
 
 <body>
 
-    <h1>Eger AI Admin</h1>
+    <div class="container">
 
-    <h2>Add Knowledge</h2>
+        <header>
+            <h1>🧠 Eger AI Admin Dashboard</h1>
 
-
-    <label>Question</label>
-    <br>
-
-    <input
-        type="text"
-        id="question"
-        placeholder="Enter the main question"
-    >
+            <p>
+                Manage Eger AI's knowledge base by adding important
+                information manually or uploading university documents.
+            </p>
+        </header>
 
 
-    <br><br>
+        <!-- SECTION 1: MANUAL KNOWLEDGE ENTRY -->
+
+        <section class="card">
+
+            <h2>✍️ Add Knowledge Manually</h2>
+
+            <p class="description">
+                Add important facts, explanations, questions, answers,
+                and corrections directly to Eger AI's knowledge base.
+            </p>
+
+            <form id="knowledgeForm">
+
+                <label for="question">
+                    Question or Topic
+                </label>
+
+                <input
+                    type="text"
+                    id="question"
+                    name="question"
+                    maxlength="200"
+                    placeholder="e.g. What is a supplementary examination?"
+                    required
+                >
 
 
-    <label>Keywords / Alternative phrases</label>
-    <br>
+                <label for="keywords">
+                    Keywords
+                </label>
 
-    <input
-        type="text"
-        id="keywords"
-        placeholder="egerton, eger uni, egerton uni"
-    >
-
-
-    <br><br>
-
-
-    <label>Answer</label>
-    <br>
-
-    <textarea
-        id="answer"
-        placeholder="Enter the answer"
-        rows="8"
-        cols="50"
-    ></textarea>
+                <input
+                    type="text"
+                    id="keywords"
+                    name="keywords"
+                    maxlength="500"
+                    placeholder="e.g. supplementary, examination, retake"
+                    required
+                >
 
 
-    <br><br>
+                <label for="answer">
+                    Answer or Information
+                </label>
+
+                <textarea
+                    id="answer"
+                    name="answer"
+                    placeholder="Enter the information Eger AI should use when answering students..."
+                    required
+                ></textarea>
 
 
-    <button id="addButton">
-        ADD KNOWLEDGE
-    </button>
+                <button type="submit" id="addButton">
+                    ADD KNOWLEDGE
+                </button>
+
+                <p
+                    id="knowledgeMessage"
+                    class="message"
+                    role="status"
+                    aria-live="polite"
+                ></p>
+
+            </form>
+
+        </section>
 
 
-    <p id="message"></p>
+        <!-- SECTION 2: DOCUMENT UPLOAD -->
 
+        <section class="card">
+
+            <h2>📄 Upload University Documents</h2>
+
+            <p class="description">
+                Upload official documents so Eger AI can extract their
+                text and use the information when answering student questions.
+            </p>
+
+            <form id="uploadForm">
+
+                <label for="title">
+                    Document Title
+                </label>
+
+                <input
+                    type="text"
+                    id="title"
+                    name="title"
+                    maxlength="200"
+                    placeholder="e.g. Academic Regulations 2026"
+                    required
+                >
+
+
+                <label for="category">
+                    Document Category
+                </label>
+
+                <select
+                    id="category"
+                    name="category"
+                    required
+                >
+                    <option value="">Choose a category</option>
+                    <option value="Admissions">Admissions</option>
+                    <option value="Academic Regulations">Academic Regulations</option>
+                    <option value="Fees">Fees</option>
+                    <option value="Accommodation">Accommodation</option>
+                    <option value="Registration">Registration</option>
+                    <option value="Examinations">Examinations</option>
+                    <option value="Other">Other</option>
+                </select>
+
+
+                <label for="document">
+                    Select Document
+                </label>
+
+                <input
+                    type="file"
+                    id="document"
+                    name="document"
+                    accept=".pdf,.docx,.txt"
+                    required
+                >
+
+                <p class="description">
+                    Accepted formats: PDF, DOCX, and TXT.
+                </p>
+
+
+                <button type="submit" id="uploadButton">
+                    UPLOAD DOCUMENT
+                </button>
+
+                <p
+                    id="uploadMessage"
+                    class="message"
+                    role="status"
+                    aria-live="polite"
+                ></p>
+
+            </form>
+
+        </section>
+
+
+        <footer>
+            Eger AI · Knowledge Management System
+        </footer>
+
+    </div>
 
     <script src="admin.js"></script>
 
 </body>
-
 </html>
