@@ -8,21 +8,77 @@ const API_URL = "https://eger-ai.onrender.com";
 // ==================================================
 // GET ADMIN PASSWORD
 // ==================================================
+// ==================================================
+// GET ADMIN PASSWORD USING CUSTOM DIALOG
+// ==================================================
 
 function getAdminPassword() {
+    return new Promise((resolve) => {
+        const dialog = document.getElementById("passwordDialog");
+        const passwordInput = document.getElementById("adminPasswordInput");
+        const confirmButton = document.getElementById("confirmPasswordButton");
+        const cancelButton = document.getElementById("cancelPasswordButton");
 
-    const password = prompt(
-        "Enter your Eger AI administrator password:"
-    );
+        if (!dialog || !passwordInput || !confirmButton || !cancelButton) {
+            resolve(null);
+            return;
+        }
 
-    if (password === null || password.length === 0) {
+        passwordInput.value = "";
+        dialog.style.display = "flex";
+        passwordInput.focus();
 
-        return null;
-    }
+        function cleanup(password) {
+            dialog.style.display = "none";
 
-    return password;
+            confirmButton.removeEventListener("click", confirm);
+            cancelButton.removeEventListener("click", cancel);
+            passwordInput.removeEventListener("keydown", handleEnter);
+
+            resolve(password);
+        }
+
+        function confirm() {
+            const password = passwordInput.value;
+
+            if (!password) {
+                alertMessage("Please enter your administrator password.");
+                passwordInput.focus();
+                return;
+            }
+
+            cleanup(password);
+        }
+
+        function cancel() {
+            cleanup(null);
+        }
+
+        function handleEnter(event) {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                confirm();
+            }
+
+            if (event.key === "Escape") {
+                cancel();
+            }
+        }
+
+        confirmButton.addEventListener("click", confirm);
+        cancelButton.addEventListener("click", cancel);
+        passwordInput.addEventListener("keydown", handleEnter);
+    });
 }
 
+// Display a message without relying on alert().
+function alertMessage(message) {
+    const messageElement = document.getElementById("uploadMessage");
+
+    if (messageElement) {
+        messageElement.textContent = message;
+    }
+}
 
 // ==================================================
 // READ SERVER RESPONSE SAFELY

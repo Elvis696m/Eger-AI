@@ -292,14 +292,57 @@
 
         </section>
 
+<footer>
+    Eger AI · Knowledge Management System
+</footer>
 
-        <footer>
-            Eger AI · Knowledge Management System
-        </footer>
+</div>
 
+<!-- ADMIN PASSWORD DIALOG -->
+<div id="passwordDialog" style="
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.8);
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    z-index: 9999;
+">
+    <div style="
+        width: 100%;
+        max-width: 400px;
+        background: #1e293b;
+        padding: 25px;
+        border-radius: 15px;
+        border: 1px solid #334155;
+    ">
+        <h2 style="color: #38bdf8;">Administrator Password</h2>
+
+        <p>Enter your password to continue.</p>
+
+        <input
+            type="password"
+            id="adminPasswordInput"
+            placeholder="Enter administrator password"
+            autocomplete="current-password"
+        >
+
+        <button type="button" id="confirmPasswordButton">
+            Continue
+        </button>
+
+        <button
+            type="button"
+            id="cancelPasswordButton"
+            style="background: #475569;"
+        >
+            Cancel
+        </button>
     </div>
+</div>
 
-    <script src="admin.js"></script>
+<script src="admin.js"></script>
 
 </body>
 </html>
