@@ -246,6 +246,7 @@ def home():
 
 # ==================================================
 # 8. ASK EGER AI
+# SEARCH KNOWLEDGE AND UPLOADED DOCUMENTS
 # ==================================================
 
 @app.route("/ask", methods=["POST", "OPTIONS"])
@@ -266,7 +267,8 @@ def ask():
     if not isinstance(user_question, str):
 
         return jsonify({
-            "error": "Question must be text."
+            "error": "Question must be text.",
+            "status": "error"
         }), 400
 
     user_question = user_question.strip()
@@ -274,19 +276,37 @@ def ask():
     if not user_question:
 
         return jsonify({
-            "error": "Please provide a question."
+            "error": "Please provide a question.",
+            "status": "error"
         }), 400
 
     cleaned_question = clean_text(
         user_question
     )
 
-    question_words = set(
-        cleaned_question.split()
+    # Common words that usually add little search value.
+    stop_words = {
+        "what", "is", "the", "a", "an", "of", "in", "for",
+        "to", "and", "how", "does", "do", "are", "can",
+        "explain", "tell", "me", "about", "from", "my",
+        "your", "it", "on", "with", "please", "i", "want",
+        "know", "define", "describe", "give", "did", "was",
+        "were", "be", "as", "at", "by", "this", "that"
+    }
+
+    question_words = (
+        set(cleaned_question.split()) - stop_words
     )
+
+    if not question_words:
+        question_words = set(cleaned_question.split())
 
     best_answer = None
     highest_score = 0
+
+    # --------------------------------------------------
+    # A. SEARCH MANUALLY ADDED KNOWLEDGE
+    # --------------------------------------------------
 
     knowledge_records = Knowledge.query.all()
 
@@ -308,12 +328,10 @@ def ask():
             stored_keywords.split()
         )
 
-        # Compare question words.
         question_matches = len(
             question_words & stored_question_words
         )
 
-        # Compare keyword words.
         keyword_matches = len(
             question_words & stored_keyword_words
         )
@@ -323,7 +341,7 @@ def ask():
             + keyword_matches * 3
         )
 
-        # Give a bonus for a complete phrase match.
+        # Bonus for a complete stored-question phrase.
         if (
             stored_question
             and stored_question in cleaned_question
@@ -334,8 +352,92 @@ def ask():
         if score > highest_score:
 
             highest_score = score
-
             best_answer = item.answer
+
+    # --------------------------------------------------
+    # B. SEARCH UPLOADED UNIVERSITY DOCUMENTS
+    # --------------------------------------------------
+
+    documents = Document.query.all()
+
+    for document in documents:
+
+        original_text = document.extracted_text or ""
+
+        if not original_text.strip():
+            continue
+
+        title_words = set(
+            clean_text(document.title).split()
+        )
+
+        category_words = set(
+            clean_text(document.category).split()
+        )
+
+        title_matches = len(
+            question_words & title_words
+        )
+
+        category_matches = len(
+            question_words & category_words
+        )
+
+        # Divide the document into passages.
+        paragraphs = [
+            paragraph.strip()
+            for paragraph in re.split(
+                r"\n\s*\n|\n",
+                original_text
+            )
+            if paragraph.strip()
+        ]
+
+        if not paragraphs:
+            paragraphs = [original_text.strip()]
+
+        best_paragraph = ""
+        best_paragraph_score = 0
+
+        # Find the passage containing the most relevant terms.
+        for paragraph in paragraphs:
+
+            paragraph_words = set(
+                clean_text(paragraph).split()
+            )
+
+            paragraph_matches = len(
+                question_words & paragraph_words
+            )
+
+            if paragraph_matches > best_paragraph_score:
+
+                best_paragraph_score = paragraph_matches
+                best_paragraph = paragraph
+
+        if best_paragraph_score == 0:
+            continue
+
+        # Score the relevant passage and its metadata.
+        document_score = (
+            best_paragraph_score * 3
+            + title_matches * 2
+            + category_matches
+        )
+
+        if document_score > highest_score:
+
+            highest_score = document_score
+
+            best_answer = (
+                f"According to {document.title} "
+                f"({document.category}):\n\n"
+                f"{best_paragraph[:2000]}"
+            )
+
+    # --------------------------------------------------
+    # C. RETURN THE BEST MATCH
+    # --------------------------------------------------
 
     if best_answer and highest_score >= 5:
 
