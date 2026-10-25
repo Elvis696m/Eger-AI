@@ -27,20 +27,11 @@ app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
-INSTANCE_DIR = os.path.join(
-    BASE_DIR,
-    "instance"
-)
+INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
 
-os.makedirs(
-    INSTANCE_DIR,
-    exist_ok=True
-)
+os.makedirs(INSTANCE_DIR, exist_ok=True)
 
-DATABASE_PATH = os.path.join(
-    INSTANCE_DIR,
-    "egerai.db"
-)
+DATABASE_PATH = os.path.join(INSTANCE_DIR, "egerai.db")
 
 app.config["SQLALCHEMY_DATABASE_URI"] = (
     "sqlite:///" + DATABASE_PATH.replace("\\", "/")
@@ -60,16 +51,11 @@ def admin_required(route_function):
     @wraps(route_function)
     def wrapper(*args, **kwargs):
 
-        # Allow browser CORS preflight requests.
         if request.method == "OPTIONS":
             return route_function(*args, **kwargs)
 
-        # Read the secret from Render's environment.
-        admin_password = os.environ.get(
-            "ADMIN_PASSWORD"
-        )
+        admin_password = os.environ.get("ADMIN_PASSWORD")
 
-        # Fail closed if the password is missing.
         if not admin_password:
 
             app.logger.error(
@@ -96,7 +82,6 @@ def admin_required(route_function):
                 len("Bearer "):
             ]
 
-        # Compare passwords without ordinary string comparison.
         if not hmac.compare_digest(
             supplied_password,
             admin_password
@@ -109,10 +94,7 @@ def admin_required(route_function):
                 )
             }), 401
 
-        return route_function(
-            *args,
-            **kwargs
-        )
+        return route_function(*args, **kwargs)
 
     return wrapper
 
@@ -186,7 +168,7 @@ class Document(db.Model):
 
 
 # ==================================================
-# 5. INITIALIZE THE DATABASE
+# 5. INITIALIZE DATABASE
 # ==================================================
 
 with app.app_context():
@@ -209,12 +191,12 @@ with app.app_context():
 
 
 # ==================================================
-# 6. CLEAN TEXT FOR QUESTION MATCHING
+# 6. TEXT CLEANING
 # ==================================================
 
 def clean_text(text):
 
-    text = text.lower()
+    text = (text or "").lower()
 
     text = re.sub(
         r"[^a-z0-9\s]",
@@ -232,7 +214,95 @@ def clean_text(text):
 
 
 # ==================================================
-# 7. HOME ROUTE
+# 7. BUILD SEARCHABLE PASSAGES
+# ==================================================
+
+def build_passages(text):
+
+    normalized_text = (text or "").replace(
+        "\r\n",
+        "\n"
+    )
+
+    normalized_text = normalized_text.replace(
+        "\r",
+        "\n"
+    )
+
+    lines = [
+        re.sub(r"\s+", " ", line).strip()
+        for line in normalized_text.split("\n")
+    ]
+
+    lines = [
+        line for line in lines if line
+    ]
+
+    if not lines:
+        return []
+
+    passages = []
+    seen = set()
+
+    # Combine consecutive lines so headings and their
+    # explanations have a better chance of being matched.
+    for start in range(len(lines)):
+
+        for window_size in (1, 2, 3, 5):
+
+            end = min(
+                start + window_size,
+                len(lines)
+            )
+
+            passage = " ".join(
+                lines[start:end]
+            ).strip()
+
+            if passage and passage not in seen:
+
+                passages.append(passage)
+                seen.add(passage)
+
+    # Keep the full text available for longer matches.
+    full_text = " ".join(lines).strip()
+
+    if full_text and full_text not in seen:
+        passages.append(full_text)
+
+    return passages
+
+
+# ==================================================
+# 8. SCORE A TEXT PASSAGE
+# ==================================================
+
+def score_passage(
+    question_words,
+    cleaned_question,
+    passage
+):
+
+    cleaned_passage = clean_text(passage)
+
+    passage_words = set(
+        cleaned_passage.split()
+    )
+
+    matches = len(
+        question_words & passage_words
+    )
+
+    score = matches * 3
+
+    if cleaned_question and cleaned_question in cleaned_passage:
+        score += 5
+
+    return score
+
+
+# ==================================================
+# 9. HOME ROUTE
 # ==================================================
 
 @app.route("/", methods=["GET"])
@@ -245,8 +315,8 @@ def home():
 
 
 # ==================================================
-# 8. ASK EGER AI
-# SEARCH KNOWLEDGE AND UPLOADED DOCUMENTS
+# 10. ASK EGER AI
+# SEARCH KNOWLEDGE AND DOCUMENTS
 # ==================================================
 
 @app.route("/ask", methods=["POST", "OPTIONS"])
@@ -255,9 +325,7 @@ def ask():
     if request.method == "OPTIONS":
         return "", 204
 
-    data = request.get_json(
-        silent=True
-    ) or {}
+    data = request.get_json(silent=True) or {}
 
     user_question = data.get(
         "question",
@@ -280,18 +348,16 @@ def ask():
             "status": "error"
         }), 400
 
-    cleaned_question = clean_text(
-        user_question
-    )
+    cleaned_question = clean_text(user_question)
 
-    # Common words that usually add little search value.
     stop_words = {
-        "what", "is", "the", "a", "an", "of", "in", "for",
-        "to", "and", "how", "does", "do", "are", "can",
-        "explain", "tell", "me", "about", "from", "my",
-        "your", "it", "on", "with", "please", "i", "want",
-        "know", "define", "describe", "give", "did", "was",
-        "were", "be", "as", "at", "by", "this", "that"
+        "what", "is", "the", "a", "an", "of", "in",
+        "for", "to", "and", "how", "does", "do",
+        "are", "can", "explain", "tell", "me", "about",
+        "from", "my", "your", "it", "on", "with",
+        "please", "i", "want", "know", "define",
+        "describe", "give", "did", "was", "were",
+        "be", "as", "at", "by", "this", "that"
     }
 
     question_words = (
@@ -308,17 +374,10 @@ def ask():
     # A. SEARCH MANUALLY ADDED KNOWLEDGE
     # --------------------------------------------------
 
-    knowledge_records = Knowledge.query.all()
+    for item in Knowledge.query.all():
 
-    for item in knowledge_records:
-
-        stored_question = clean_text(
-            item.question
-        )
-
-        stored_keywords = clean_text(
-            item.keywords
-        )
+        stored_question = clean_text(item.question)
+        stored_keywords = clean_text(item.keywords)
 
         stored_question_words = set(
             stored_question.split()
@@ -341,7 +400,6 @@ def ask():
             + keyword_matches * 3
         )
 
-        # Bonus for a complete stored-question phrase.
         if (
             stored_question
             and stored_question in cleaned_question
@@ -355,12 +413,10 @@ def ask():
             best_answer = item.answer
 
     # --------------------------------------------------
-    # B. SEARCH UPLOADED UNIVERSITY DOCUMENTS
+    # B. SEARCH UPLOADED DOCUMENTS
     # --------------------------------------------------
 
-    documents = Document.query.all()
-
-    for document in documents:
+    for document in Document.query.all():
 
         original_text = document.extracted_text or ""
 
@@ -383,44 +439,29 @@ def ask():
             question_words & category_words
         )
 
-        # Divide the document into passages.
-        paragraphs = [
-            paragraph.strip()
-            for paragraph in re.split(
-                r"\n\s*\n|\n",
-                original_text
-            )
-            if paragraph.strip()
-        ]
-
-        if not paragraphs:
-            paragraphs = [original_text.strip()]
+        passages = build_passages(original_text)
 
         best_paragraph = ""
         best_paragraph_score = 0
 
-        # Find the passage containing the most relevant terms.
-        for paragraph in paragraphs:
+        for paragraph in passages:
 
-            paragraph_words = set(
-                clean_text(paragraph).split()
+            paragraph_score = score_passage(
+                question_words,
+                cleaned_question,
+                paragraph
             )
 
-            paragraph_matches = len(
-                question_words & paragraph_words
-            )
+            if paragraph_score > best_paragraph_score:
 
-            if paragraph_matches > best_paragraph_score:
-
-                best_paragraph_score = paragraph_matches
+                best_paragraph_score = paragraph_score
                 best_paragraph = paragraph
 
-        if best_paragraph_score == 0:
+        if not best_paragraph:
             continue
 
-        # Score the relevant passage and its metadata.
         document_score = (
-            best_paragraph_score * 3
+            best_paragraph_score
             + title_matches * 2
             + category_matches
         )
@@ -432,7 +473,7 @@ def ask():
             best_answer = (
                 f"According to {document.title} "
                 f"({document.category}):\n\n"
-                f"{best_paragraph[:2000]}"
+                f"{best_paragraph[:3000]}"
             )
 
     # --------------------------------------------------
@@ -458,7 +499,7 @@ def ask():
 
 
 # ==================================================
-# 9. ADD KNOWLEDGE
+# 11. ADD KNOWLEDGE
 # ADMIN PASSWORD REQUIRED
 # ==================================================
 
@@ -469,26 +510,12 @@ def add_knowledge():
     if request.method == "OPTIONS":
         return "", 204
 
-    data = request.get_json(
-        silent=True
-    ) or {}
+    data = request.get_json(silent=True) or {}
 
-    question = data.get(
-        "question",
-        ""
-    )
+    question = data.get("question", "")
+    keywords = data.get("keywords", "")
+    answer = data.get("answer", "")
 
-    keywords = data.get(
-        "keywords",
-        ""
-    )
-
-    answer = data.get(
-        "answer",
-        ""
-    )
-
-    # Validate field types.
     if not all(
         isinstance(value, str)
         for value in (question, keywords, answer)
@@ -515,8 +542,7 @@ def add_knowledge():
 
         return jsonify({
             "error": (
-                "Question must not exceed "
-                "200 characters."
+                "Question must not exceed 200 characters."
             )
         }), 400
 
@@ -524,8 +550,7 @@ def add_knowledge():
 
         return jsonify({
             "error": (
-                "Keywords must not exceed "
-                "500 characters."
+                "Keywords must not exceed 500 characters."
             )
         }), 400
 
@@ -537,10 +562,7 @@ def add_knowledge():
             answer=answer
         )
 
-        db.session.add(
-            new_knowledge
-        )
-
+        db.session.add(new_knowledge)
         db.session.commit()
 
         return jsonify({
@@ -562,7 +584,7 @@ def add_knowledge():
 
 
 # ==================================================
-# 10. EXTRACT PDF TEXT
+# 12. EXTRACT PDF TEXT
 # ==================================================
 
 def extract_pdf_text(file_bytes):
@@ -585,17 +607,13 @@ def extract_pdf_text(file_bytes):
 
         if page_text.strip():
 
-            extracted_pages.append(
-                page_text
-            )
+            extracted_pages.append(page_text)
 
-    return "\n".join(
-        extracted_pages
-    )
+    return "\n".join(extracted_pages)
 
 
 # ==================================================
-# 11. EXTRACT DOCX TEXT
+# 13. EXTRACT DOCX TEXT
 # ==================================================
 
 def extract_docx_text(file_bytes):
@@ -606,7 +624,6 @@ def extract_docx_text(file_bytes):
 
     extracted_parts = []
 
-    # Extract paragraphs.
     for paragraph in document.paragraphs:
 
         if paragraph.text.strip():
@@ -615,7 +632,6 @@ def extract_docx_text(file_bytes):
                 paragraph.text
             )
 
-    # Extract table contents.
     for table in document.tables:
 
         for row in table.rows:
@@ -627,28 +643,22 @@ def extract_docx_text(file_bytes):
 
             if row_text.strip():
 
-                extracted_parts.append(
-                    row_text
-                )
+                extracted_parts.append(row_text)
 
-    return "\n".join(
-        extracted_parts
-    )
+    return "\n".join(extracted_parts)
 
 
 # ==================================================
-# 12. EXTRACT TXT TEXT
+# 14. EXTRACT TXT TEXT
 # ==================================================
 
 def extract_txt_text(file_bytes):
 
-    return file_bytes.decode(
-        "utf-8-sig"
-    )
+    return file_bytes.decode("utf-8-sig")
 
 
 # ==================================================
-# 13. UPLOAD UNIVERSITY DOCUMENT
+# 15. UPLOAD UNIVERSITY DOCUMENT
 # ADMIN PASSWORD REQUIRED
 # ==================================================
 
@@ -669,15 +679,9 @@ def upload_document():
         ""
     ).strip()
 
-    uploaded_file = request.files.get(
-        "document"
-    )
+    uploaded_file = request.files.get("document")
 
-    if (
-        not title
-        or not category
-        or not uploaded_file
-    ):
+    if not title or not category or not uploaded_file:
 
         return jsonify({
             "error": (
@@ -690,8 +694,7 @@ def upload_document():
 
         return jsonify({
             "error": (
-                "Title must not exceed "
-                "200 characters."
+                "Title must not exceed 200 characters."
             )
         }), 400
 
@@ -719,8 +722,8 @@ def upload_document():
 
         return jsonify({
             "error": (
-                "Only PDF, DOCX, and TXT "
-                "files are supported."
+                "Only PDF, DOCX, and TXT files "
+                "are supported."
             )
         }), 400
 
@@ -734,7 +737,6 @@ def upload_document():
                 "error": "The uploaded file is empty."
             }), 400
 
-        # Extract text according to the file extension.
         if extension == ".pdf":
 
             extracted_text = extract_pdf_text(
@@ -764,9 +766,6 @@ def upload_document():
                 )
             }), 400
 
-        # Save extracted text and document metadata.
-        # This does not save the original file itself.
-
         new_document = Document(
             title=title,
             category=category,
@@ -774,10 +773,7 @@ def upload_document():
             extracted_text=extracted_text
         )
 
-        db.session.add(
-            new_document
-        )
-
+        db.session.add(new_document)
         db.session.commit()
 
         return jsonify({
@@ -816,7 +812,7 @@ def upload_document():
 
 
 # ==================================================
-# 14. FILE SIZE ERROR
+# 16. FILE SIZE ERROR
 # ==================================================
 
 @app.errorhandler(413)
@@ -830,7 +826,7 @@ def file_too_large(error):
 
 
 # ==================================================
-# 15. RUN THE APPLICATION LOCALLY
+# 17. RUN APPLICATION LOCALLY
 # ==================================================
 
 if __name__ == "__main__":
