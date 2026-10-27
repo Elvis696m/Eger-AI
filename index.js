@@ -1,95 +1,77 @@
-let micButton = document.getElementById("micButton");
-let userInput = document.getElementById("userInput");
-let sendButton = document.getElementById("sendButton");
 
-let chatArea = document.getElementById("chatArea");
+let userName = localStorage.getItem("userName");
+const welcomeMessage = document.getElementById("welcomeMessage");
 
+// Ask for username only if one has not been saved
+if (!userName || !userName.trim()) {
+    userName = prompt("Enter your username:");
 
-/* MICROPHONE */
-
-let recognition = new webkitSpeechRecognition();
-
-recognition.continuous = false;
-recognition.interimResults = false;
-recognition.lang = "en-US";
-
-
-recognition.onresult = function(event) {
-
-    let speech = event.results[0][0].transcript;
-
-    userInput.value = speech;
-
-};
-
-
-micButton.onclick = function() {
-
-    recognition.start();
-
-};
-
-
-/* SEND BUTTON */
-
-sendButton.onclick = function() {
-
-    let message = userInput.value.trim();
-
-
-    /* Don't send empty messages */
-
-    if (message === "") {
-        return;
+    if (!userName || !userName.trim()) {
+        userName = "Player";
     }
 
+    userName = userName.trim();
+    localStorage.setItem("userName", userName);
+}
 
-    /* Create user's message */
+// Display welcome message
+welcomeMessage.textContent = `Welcome back, ${userName}!`;
 
-    let userMessage = document.createElement("div");
+const results = document.querySelectorAll('input[type="radio"]');
 
-    userMessage.className = "user-message";
+const totalWins = document.querySelector("#totalWins");
+const totalLosses = document.querySelector("#totalLosses");
+const winRate = document.querySelector("#winRate");
 
-    userMessage.textContent = message;
+// Restore saved results when the page loads
+results.forEach(function (radio) {
+    const savedResult = localStorage.getItem(radio.name);
 
-    chatArea.appendChild(userMessage);
-
-
-    /* Create Eger AI response */
-fetch("https://eger-ai.onrender.com/ask", {
-    method: "POST",
-
-    headers: {
-        "Content-Type": "application/json"
-    },
-
-    body: JSON.stringify({
-        question: message
-    })
-})
-.then(response => response.json())
-.then(data => {
-
-    let aiMessage = document.createElement("div");
-
-    aiMessage.className = "ai-message";
-
-    aiMessage.textContent = data.answer;
-
-    chatArea.appendChild(aiMessage);
-
-})
-.catch(error => {
-
-    console.log("Error:", error);
-
+    if (savedResult === radio.value) {
+        radio.checked = true;
+    }
 });
 
-    
+// Calculate and display trading statistics
+const updateStatistics = function () {
+    let wins = 0;
+    let losses = 0;
 
+    // Count selected wins and losses
+    results.forEach(function (radio) {
+        if (radio.checked) {
+            if (radio.value === "win") {
+                wins++;
+            } else if (radio.value === "loss") {
+                losses++;
+            }
+        }
+    });
 
-    /* Clear input */
+    // Calculate total recorded trades
+    let totalTrades = wins + losses;
 
-    userInput.value = "";
+    // Calculate win rate safely
+    let winRateValue = 0;
 
+    if (totalTrades > 0) {
+        winRateValue = (wins / totalTrades) * 100;
+    }
+
+    // Display statistics on the webpage
+    totalWins.textContent = wins;
+    totalLosses.textContent = losses;
+    winRate.textContent = Math.floor(winRateValue.toFixed(1))+ "%";
 };
+
+// Save a result and update statistics whenever a result changes
+results.forEach(function (radio) {
+    radio.addEventListener("change", function () {
+        localStorage.setItem(radio.name, radio.value);
+        updateStatistics();
+    });
+});
+
+// Display correct statistics immediately when the page loads
+updateStatistics();
+
