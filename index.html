@@ -7,26 +7,63 @@
     <title>Eger AI</title>
     <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
-    <h1>WELCOME TO EGER AI</h1>
-    <div class="chat-box">
 
-        <input
-            type="text"
-            id="userInput"
-            class="chat-input"
-            placeholder="Ask anything"
-        >
-        <button id="micButton" type="button">🎤</button>
+    <header>
+        <div class="brand">
+            <div class="logo">E</div>
 
-        <button id="sendButton" type="button">↑</button>
+            <div class="brand-info">
+                <h1>Eger AI</h1>
+                <p>Your University Assistant</p>
+            </div>
+        </div>
+
+        <div class="status">
+            <span class="status-dot"></span>
+            Online
+        </div>
+    </header>
+
+    <main id="chatArea">
+
+        <div class="intro">
+            <div class="intro-logo">E</div>
+
+            <h2>Knowledge starts here.</h2>
+
+            <p>
+                Ask questions, explore your study materials
+                and get help with your university journey.
+            </p>
+        </div>
+
+    </main>
+
+    <div class="input-container">
+
+        <div class="chat-box">
+
+            <input
+                type="text"
+                id="userInput"
+                class="chat-input"
+                placeholder="Message Eger AI..."
+                autocomplete="off"
+            >
+
+            <button id="micButton" type="button">🎤</button>
+
+            <button id="sendButton" type="button">↑</button>
+
+        </div>
+
+        <p class="input-footer">
+            Eger AI can make mistakes. Verify important academic information.
+        </p>
 
     </div>
-
-
-    <!-- AI responses will appear here -->
-    <div id="chatArea"></div>
-
 
     <script src="index.js"></script>
 

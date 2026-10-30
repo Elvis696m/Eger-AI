@@ -241,3 +241,51 @@ if (userInput) {
         }
     );
 }
+// =========================================
+// EGER AI USER WELCOME SYSTEM
+// =========================================
+
+function initializeWelcome() {
+
+    const savedName = localStorage.getItem("egerUserName");
+
+    let userName = savedName;
+
+    if (!savedName) {
+
+        const enteredName = prompt(
+            "Welcome to Eger AI! Please enter your username"
+        );
+
+        if (enteredName && enteredName.trim() !== "") {
+
+            userName = enteredName.trim();
+
+            localStorage.setItem(
+                "egerUserName",
+                userName
+            );
+
+        }
+    }
+
+    if (userName) {
+
+        const greeting = savedName
+            ? `Welcome back, ${userName}! `
+            : `Welcome to Eger AI, ${userName}! 🎓`;
+
+        showMessage("ai-message", greeting);
+
+    } else {
+
+        showMessage(
+            "ai-message",
+            "Welcome to Eger AI! "
+        );
+
+    }
+
+}
+
+initializeWelcome();

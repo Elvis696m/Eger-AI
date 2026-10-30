@@ -1,124 +1,498 @@
-body {
-    background-color: black;
-    color: white;
-    font-family: Arial, sans-serif;
-    text-align: center;
+/* =========================================
+   EGER AI - MAIN DESIGN
+========================================= */
+
+* {
+    box-sizing: border-box;
 }
-h1 {
-    margin-top: 50px;
+
+body {
+    margin: 0;
+    background:
+        radial-gradient(
+            circle at 50% 0%,
+            #171438 0%,
+            #090914 40%,
+            #07070d 100%
+        );
+
+    color: #f5f5ff;
+    font-family: Arial, sans-serif;
+    min-height: 100vh;
+}
+
+
+/* =========================================
+   HEADER
+========================================= */
+
+header {
+    position: fixed;
+    top: 0;
+    left: 0;
+
+    width: 100%;
+    height: 75px;
+
+    padding: 0 35px;
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    background: rgba(9, 9, 20, 0.88);
+    backdrop-filter: blur(15px);
+
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+
+    z-index: 100;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.logo {
+    width: 42px;
+    height: 42px;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    border-radius: 13px;
+
+    background: linear-gradient(
+        135deg,
+        #8b5cf6,
+        #3b82f6
+    );
+
+    font-size: 23px;
+    font-weight: bold;
+
+    box-shadow: 0 0 20px rgba(139,92,246,0.25);
+}
+
+.brand-info h1 {
+    font-size: 19px;
+    margin: 0;
+    letter-spacing: 0.5px;
+}
+
+.brand-info p {
+    font-size: 11px;
+    color: #9292ae;
+    margin: 4px 0 0;
+}
+
+.status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    font-size: 12px;
+    color: #b7b7ca;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+
+    background: #34d399;
+    border-radius: 50%;
+
+    box-shadow: 0 0 10px #34d399;
+}
+
+
+/* =========================================
+   CHAT AREA
+========================================= */
+
+#chatArea {
+    position: fixed;
+
+    top: 75px;
+    bottom: 115px;
+
+    left: 0;
+    right: 0;
+
+    width: 100%;
+    max-width: 850px;
+
+    margin: 0 auto;
+
+    padding: 30px 30px 40px;
+
+    display: flex;
+    flex-direction: column;
+
+    overflow-y: auto;
+    scroll-behavior: smooth;
+}
+
+
+/* Scrollbar */
+
+#chatArea::-webkit-scrollbar {
+    width: 6px;
+}
+
+#chatArea::-webkit-scrollbar-thumb {
+    background: #35334e;
+    border-radius: 10px;
+}
+
+#chatArea::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+
+/* =========================================
+   WELCOME INTRO
+========================================= */
+
+.intro {
+    text-align: center;
+
+    margin: auto auto 30px;
+    max-width: 500px;
+
+    padding: 20px;
+}
+
+.intro-logo {
+    width: 75px;
+    height: 75px;
+
+    margin: 0 auto 25px;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    border-radius: 24px;
+
+    background: linear-gradient(
+        135deg,
+        #8b5cf6,
+        #3b82f6
+    );
+
+    font-size: 38px;
+    font-weight: bold;
+
+    box-shadow: 0 0 45px rgba(124,58,237,0.3);
+}
+
+.intro h2 {
+    font-size: 30px;
+    margin-bottom: 12px;
+
+    background: linear-gradient(
+        90deg,
+        #c4b5fd,
+        #60a5fa
+    );
+
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.intro p {
+    color: #9999b3;
+    font-size: 14px;
+    line-height: 1.7;
+}
+
+
+/* =========================================
+   USER MESSAGE
+========================================= */
+
+.user-message {
+    align-self: flex-end;
+
+    max-width: 80%;
+    width: fit-content;
+
+    background: linear-gradient(
+        135deg,
+        #5940a8,
+        #394caa
+    );
+
+    color: white;
+
+    padding: 13px 18px;
+
+    border-radius: 20px 20px 5px 20px;
+
+    margin: 15px 0 25px;
+
+    font-size: 15px;
+    line-height: 1.6;
+
+    overflow-wrap: anywhere;
+
+    box-shadow: 0 5px 20px rgba(60,50,150,0.15);
+}
+
+
+/* =========================================
+   EGER AI RESPONSE
+========================================= */
+
+.ai-message {
+    align-self: flex-start;
+
+    width: 100%;
+    max-width: 100%;
+
+    background: transparent;
+
+    color: #e3e3f0;
+
+    padding: 8px 0;
+
+    margin: 0 0 30px;
+
+    font-size: 15px;
+    line-height: 1.85;
+
+    text-align: left;
+
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+
+    border: none;
+}
+
+
+/* =========================================
+   BOTTOM INPUT AREA
+========================================= */
+
+.input-container {
+    position: fixed;
+
+    bottom: 0;
+    left: 0;
+
+    width: 100%;
+
+    padding: 18px 20px 12px;
+
+    background: linear-gradient(
+        to top,
+        #090914 75%,
+        rgba(9,9,20,0.85),
+        transparent
+    );
+
+    z-index: 100;
 }
 
 .chat-box {
     position: relative;
-    display: inline-block;
-    margin-top: 50px;
+
+    width: 100%;
+    max-width: 750px;
+
+    margin: 0 auto;
 }
 
-.chat-input {
-    width: 500px;
-    height: 60px;
-    font-size: 20px;
 
-    border-radius: 30px;
-    border: 1px solid #555;
-    padding: 0 100px 0 20px;
-    box-sizing: border-box;
+/* =========================================
+   INPUT FIELD
+========================================= */
+
+.chat-input {
+    width: 100%;
+    height: 60px;
+
+    padding: 0 105px 0 22px;
+
+    border-radius: 20px;
+
+    border: 1px solid #34334e;
+
+    background: #171727;
+
+    color: white;
+
+    font-size: 16px;
 
     outline: none;
+
+    transition: 0.25s;
+}
+
+.chat-input::placeholder {
+    color: #77778f;
 }
 
 .chat-input:focus {
-    border-color: aquamarine;
+    border-color: #8b5cf6;
+
+    box-shadow:
+        0 0 0 3px rgba(139,92,246,0.12);
 }
 
-/* Microphone */
+
+/* =========================================
+   MICROPHONE
+========================================= */
+
 #micButton {
     position: absolute;
 
-    right: 45px;
+    right: 58px;
     top: 50%;
+
     transform: translateY(-50%);
+
     border: none;
     background: transparent;
 
-    font-size: 23px;
+    color: white;
+
+    font-size: 21px;
 
     cursor: pointer;
+
+    transition: 0.2s;
+}
+
+#micButton:hover {
+    transform: translateY(-50%) scale(1.15);
+}
+
+#micButton:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 
-/* Send arrow */
+/* =========================================
+   SEND BUTTON
+========================================= */
+
 #sendButton {
     position: absolute;
 
-    right: 5px;
+    right: 12px;
     top: 50%;
 
     transform: translateY(-50%);
 
-    width: 35px;
-    height: 35px;
+    width: 38px;
+    height: 38px;
 
     border: none;
-    border-radius: 50%;
+    border-radius: 13px;
 
-    background-color: white;
-    color: black;
+    background: linear-gradient(
+        135deg,
+        #8b5cf6,
+        #3b82f6
+    );
 
-    font-size: 22px;
+    color: white;
+
+    font-size: 24px;
 
     cursor: pointer;
+
+    transition: 0.2s;
 }
 
 #sendButton:hover {
-    transform: translateY(-50%) scale(1.1);
+    transform: translateY(-50%) scale(1.08);
+
+    box-shadow: 0 0 20px rgba(139,92,246,0.4);
+}
+
+#sendButton:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 
-/* Area below the chat box */
-#chatArea {
-    width: 500px;
-    margin: 30px auto;
+/* =========================================
+   INPUT FOOTER
+========================================= */
 
-    text-align: left;
+.input-footer {
+    text-align: center;
+
+    color: #686880;
+
+    font-size: 10px;
+
+    margin: 10px 0 0;
 }
 
 
-/* User question */
-.user-message {
-    background-color: #222;
+/* =========================================
+   MOBILE RESPONSIVENESS
+========================================= */
 
-    color: white;
+@media (max-width: 600px) {
 
-    padding: 12px 16px;
+    header {
+        padding: 0 17px;
+        height: 65px;
+    }
 
-    border-radius: 15px;
+    .logo {
+        width: 37px;
+        height: 37px;
+    }
 
-    margin-bottom: 15px;
+    .brand-info h1 {
+        font-size: 17px;
+    }
 
-    width: fit-content;
-    max-width: 80%;
+    #chatArea {
+        top: 65px;
+        bottom: 105px;
 
-    margin-left: auto;
-}
+        padding: 20px 17px 30px;
+    }
 
+    .intro h2 {
+        font-size: 25px;
+    }
 
-/* Eger AI response */
-.ai-message {
-    background-color: #111;
+    .intro p {
+        font-size: 13px;
+    }
 
-    color: white;
+    .user-message {
+        max-width: 90%;
+        font-size: 14px;
+    }
 
-    padding: 12px 16px;
+    .ai-message {
+        font-size: 14px;
+    }
 
-    border-radius: 15px;
+    .input-container {
+        padding: 12px 12px 10px;
+    }
 
-    margin-bottom: 20px;
+    .chat-input {
+        height: 55px;
+        font-size: 16px;
+    }
 
-    width: fit-content;
-    max-width: 80%;
-
-    margin-right: auto;
-
-    border: 1px solid #333;
+    .input-footer {
+        font-size: 9px;
+    }
 }
