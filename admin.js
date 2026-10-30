@@ -254,9 +254,17 @@ if (uploadForm) {
 
             const data = await readResponse(response);
 
+            // Support both the new and previous backend formats.
+
+            const characterCount =
+                data.characters ??
+                data.characters_extracted ??
+                data.character_count ??
+                0;
+
             uploadMessage.textContent =
                 `${data.message || "Document uploaded successfully!"} ` +
-                `Extracted ${data.characters_extracted ?? 0} characters.`;
+                `Extracted ${characterCount} characters.`;
 
             uploadForm.reset();
 
