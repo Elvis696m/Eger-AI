@@ -216,7 +216,171 @@ def clean_text(text):
 
 
 # ==================================================
-# 7. SPLIT DOCUMENTS INTO PASSAGES
+# 7. REMOVE CONVERSATIONAL FILLERS
+# ==================================================
+
+def normalize_question(question):
+
+    question = str(question or "").strip()
+
+    # Remove common forms of address at the beginning.
+    # Only removes them when they are being used as
+    # conversational fillers.
+
+    question = re.sub(
+        r"^(bro|bruh|dude|mate|man|girl|bitch)\b[\s,!?]*",
+        "",
+        question,
+        flags=re.IGNORECASE
+    )
+
+    # Remove common forms of address at the end.
+
+    question = re.sub(
+        r"[\s,!?]+\b(bro|bruh|dude|mate|man)\b[.!?]*$",
+        "",
+        question,
+        flags=re.IGNORECASE
+    )
+
+    return question.strip()
+
+
+# ==================================================
+# 8. RECOGNIZE FOLLOW-UP INTENT
+# ==================================================
+
+def recognize_followup(question):
+
+    cleaned = clean_text(question)
+
+    followup_patterns = {
+
+        "simplify": [
+            "simplify",
+            "simplify that",
+            "in simple english",
+            "explain simply",
+            "make it simple",
+            "make it easier",
+            "easy english"
+        ],
+
+        "examples": [
+            "give examples",
+            "examples",
+            "some examples",
+            "show examples",
+            "example please"
+        ],
+
+        "explain": [
+            "explain",
+            "explain that",
+            "elaborate",
+            "tell me more",
+            "more details",
+            "go deeper",
+            "expand on that"
+        ],
+
+        "why": [
+            "why",
+            "why is that",
+            "why is that so",
+            "how come"
+        ],
+
+        "continue": [
+            "continue",
+            "go on",
+            "proceed",
+            "continue explaining"
+        ],
+
+        "summarize": [
+            "summarize",
+            "summarise",
+            "short summary",
+            "briefly explain",
+            "summarise that"
+        ],
+
+        "clarify": [
+            "what do you mean",
+            "what does that mean",
+            "clarify",
+            "i dont understand",
+            "i do not understand"
+        ]
+
+    }
+
+    for intent, phrases in followup_patterns.items():
+
+        for phrase in phrases:
+
+            if cleaned == phrase:
+
+                return intent
+
+            if cleaned.startswith(phrase + " "):
+
+                return intent
+
+    return None
+
+
+# ==================================================
+# 9. BUILD CONTEXTUAL QUESTION
+# ==================================================
+
+def build_contextual_question(
+    user_question,
+    previous_question,
+    previous_answer
+):
+
+    intent = recognize_followup(
+        user_question
+    )
+
+    if not intent or not previous_question:
+
+        return user_question, None
+
+    # The previous question identifies the topic.
+    # The follow-up intent provides additional context.
+
+    intent_keywords = {
+
+        "simplify": "simple explanation",
+
+        "examples": "examples applications",
+
+        "explain": "explanation details",
+
+        "why": "reasons causes importance",
+
+        "continue": "further explanation",
+
+        "summarize": "summary main points",
+
+        "clarify": "definition explanation"
+
+    }
+
+    contextual_question = (
+        previous_question
+        + " "
+        + intent_keywords.get(intent, "")
+    )
+
+    return contextual_question, intent
+
+
+# ==================================================
+# 10. SPLIT DOCUMENTS INTO PASSAGES
 # ==================================================
 
 def split_into_passages(
@@ -262,16 +426,18 @@ def split_into_passages(
         ).strip()
 
         if passage:
+
             passages.append(passage)
 
         if start + chunk_size >= len(words):
+
             break
 
     return passages
 
 
 # ==================================================
-# 8. SEARCH UNIVERSITY DOCUMENTS
+# 11. SEARCH UNIVERSITY DOCUMENTS
 # ==================================================
 
 def search_documents(
@@ -282,6 +448,7 @@ def search_documents(
     documents = Document.query.all()
 
     if not documents:
+
         return None
 
     passages = []
@@ -301,6 +468,7 @@ def search_documents(
             )
 
             if not cleaned_passage:
+
                 continue
 
             passages.append({
@@ -320,6 +488,7 @@ def search_documents(
             })
 
     if not passages:
+
         return None
 
     cleaned_question = clean_text(
@@ -327,6 +496,7 @@ def search_documents(
     )
 
     if not cleaned_question:
+
         return None
 
     corpus = [
@@ -368,6 +538,7 @@ def search_documents(
     )
 
     if best_score < minimum_score:
+
         return None
 
     best_match = passages[best_index].copy()
@@ -381,58 +552,10 @@ def search_documents(
 
 
 # ==================================================
-# 9. HOME ROUTE
+# 12. SEARCH KNOWLEDGE DATABASE
 # ==================================================
 
-@app.route("/", methods=["GET"])
-def home():
-
-    return jsonify({
-
-        "message": "Eger AI Flask server is working!",
-
-        "status": "online",
-
-        "document_search": "TF-IDF + cosine similarity"
-
-    })
-
-
-# ==================================================
-# 10. ASK EGER AI
-# ==================================================
-
-@app.route(
-    "/ask",
-    methods=["POST", "OPTIONS"]
-)
-def ask():
-
-    if request.method == "OPTIONS":
-        return "", 204
-
-    data = request.get_json(
-        silent=True
-    ) or {}
-
-    user_question = data.get(
-        "question",
-        ""
-    )
-
-    if not isinstance(user_question, str):
-
-        return jsonify({
-            "error": "Question must be text."
-        }), 400
-
-    user_question = user_question.strip()
-
-    if not user_question:
-
-        return jsonify({
-            "error": "Please provide a question."
-        }), 400
+def search_knowledge(user_question):
 
     cleaned_question = clean_text(
         user_question
@@ -442,9 +565,9 @@ def ask():
         cleaned_question.split()
     )
 
-    # ------------------------------------------
-    # A. SEARCH KNOWLEDGE DATABASE
-    # ------------------------------------------
+    if not question_words:
+
+        return None
 
     best_answer = None
 
@@ -496,12 +619,138 @@ def ask():
 
             best_answer = item.answer
 
+    if best_answer and highest_score >= 5:
+
+        return {
+
+            "answer": best_answer,
+
+            "score": highest_score
+
+        }
+
+    return None
+
+
+# ==================================================
+# 13. HOME ROUTE
+# ==================================================
+
+@app.route("/", methods=["GET"])
+def home():
+
+    return jsonify({
+
+        "message": "Eger AI Flask server is working!",
+
+        "status": "online",
+
+        "document_search": "TF-IDF + cosine similarity",
+
+        "conversation_memory": "enabled"
+
+    })
+
+
+# ==================================================
+# 14. ASK EGER AI
+# ==================================================
+
+@app.route(
+    "/ask",
+    methods=["POST", "OPTIONS"]
+)
+def ask():
+
+    if request.method == "OPTIONS":
+
+        return "", 204
+
+    data = request.get_json(
+        silent=True
+    ) or {}
+
+    user_question = data.get(
+        "question",
+        ""
+    )
+
+    previous_question = data.get(
+        "previousQuestion",
+        ""
+    )
+
+    previous_answer = data.get(
+        "previousAnswer",
+        ""
+    )
+
     # ------------------------------------------
-    # B. SEARCH UPLOADED DOCUMENTS
+    # A. VALIDATE INPUT
+    # ------------------------------------------
+
+    if not isinstance(user_question, str):
+
+        return jsonify({
+            "error": "Question must be text."
+        }), 400
+
+    if not isinstance(previous_question, str):
+
+        previous_question = ""
+
+    if not isinstance(previous_answer, str):
+
+        previous_answer = ""
+
+    user_question = user_question.strip()
+
+    if not user_question:
+
+        return jsonify({
+            "error": "Please provide a question."
+        }), 400
+
+    # ------------------------------------------
+    # B. NORMALIZE QUESTION
+    # ------------------------------------------
+
+    normalized_question = normalize_question(
+        user_question
+    )
+
+    if not normalized_question:
+
+        normalized_question = user_question
+
+    # ------------------------------------------
+    # C. RECOGNIZE FOLLOW-UP
+    # ------------------------------------------
+
+    contextual_question, followup_intent = (
+        build_contextual_question(
+            normalized_question,
+            previous_question,
+            previous_answer
+        )
+    )
+
+    is_followup = (
+        followup_intent is not None
+    )
+
+    app.logger.info(
+        "Question: %s | Follow-up: %s",
+        normalized_question,
+        followup_intent
+    )
+
+    # ------------------------------------------
+    # D. SEARCH DOCUMENTS
     # ------------------------------------------
 
     document_result = search_documents(
-        user_question
+        contextual_question
     )
 
     if document_result:
@@ -522,28 +771,105 @@ def ask():
 
             "passage_number": document_result["passage_number"],
 
-            "similarity": document_result["similarity"]
+            "similarity": document_result["similarity"],
+
+            "followup": is_followup,
+
+            "intent": followup_intent
 
         })
 
     # ------------------------------------------
-    # C. KNOWLEDGE DATABASE FALLBACK
+    # E. SEARCH KNOWLEDGE DATABASE
     # ------------------------------------------
 
-    if best_answer and highest_score >= 5:
+    knowledge_result = search_knowledge(
+        contextual_question
+    )
+
+    if knowledge_result:
 
         return jsonify({
 
-            "answer": best_answer,
+            "answer": knowledge_result["answer"],
 
             "status": "success",
 
-            "source": "knowledge"
+            "source": "knowledge",
+
+            "followup": is_followup,
+
+            "intent": followup_intent
 
         })
 
     # ------------------------------------------
-    # D. NO ANSWER FOUND
+    # F. PREVIOUS ANSWER FALLBACK
+    # ------------------------------------------
+
+    if is_followup and previous_answer:
+
+        fallback_messages = {
+
+            "simplify": (
+                "I don't have another passage to simplify "
+                "right now. Here is the explanation I found:"
+            ),
+
+            "examples": (
+                "I couldn't find a separate examples section. "
+                "Here is the information available:"
+            ),
+
+            "explain": (
+                "I couldn't find additional information "
+                "in the uploaded documents. Here is the "
+                "previous explanation:"
+            ),
+
+            "why": (
+                "I couldn't find further information "
+                "explaining why. Here is the previous answer:"
+            ),
+
+            "continue": (
+                "I couldn't find another relevant passage. "
+                "Here is the information available:"
+            ),
+
+            "summarize": (
+                "Here is the information available to summarize:"
+            ),
+
+            "clarify": (
+                "Let me refer back to the previous answer:"
+            )
+
+        }
+
+        return jsonify({
+
+            "answer": (
+                fallback_messages.get(
+                    followup_intent,
+                    "Here is the previous answer:"
+                )
+                + "\n\n"
+                + previous_answer
+            ),
+
+            "status": "success",
+
+            "source": "conversation_memory",
+
+            "followup": True,
+
+            "intent": followup_intent
+
+        })
+
+    # ------------------------------------------
+    # G. NO ANSWER FOUND
     # ------------------------------------------
 
     return jsonify({
@@ -556,11 +882,17 @@ def ask():
             "University office."
         ),
 
-        "status": "not_found"
+        "status": "not_found",
+
+        "source": None,
+
+        "followup": False
 
     })
+
+
 # ==================================================
-# 11. ADD KNOWLEDGE
+# 15. ADD KNOWLEDGE
 # ADMIN PASSWORD REQUIRED
 # ==================================================
 
@@ -572,6 +904,7 @@ def ask():
 def add_knowledge():
 
     if request.method == "OPTIONS":
+
         return "", 204
 
     data = request.get_json(
@@ -593,7 +926,6 @@ def add_knowledge():
         ""
     )
 
-    # Validate field types.
     if not all(
         isinstance(value, str)
         for value in (question, keywords, answer)
@@ -604,7 +936,9 @@ def add_knowledge():
         }), 400
 
     question = question.strip()
+
     keywords = keywords.strip()
+
     answer = answer.strip()
 
     if not question or not keywords or not answer:
@@ -670,7 +1004,7 @@ def add_knowledge():
 
 
 # ==================================================
-# 12. EXTRACT PDF TEXT
+# 16. EXTRACT PDF TEXT
 # ==================================================
 
 def extract_pdf_text(file_bytes):
@@ -703,7 +1037,7 @@ def extract_pdf_text(file_bytes):
 
 
 # ==================================================
-# 13. EXTRACT DOCX TEXT
+# 17. EXTRACT DOCX TEXT
 # ==================================================
 
 def extract_docx_text(file_bytes):
@@ -714,7 +1048,6 @@ def extract_docx_text(file_bytes):
 
     extracted_parts = []
 
-    # Extract paragraphs.
     for paragraph in document.paragraphs:
 
         if paragraph.text.strip():
@@ -723,7 +1056,6 @@ def extract_docx_text(file_bytes):
                 paragraph.text
             )
 
-    # Extract tables.
     for table in document.tables:
 
         for row in table.rows:
@@ -745,7 +1077,7 @@ def extract_docx_text(file_bytes):
 
 
 # ==================================================
-# 14. EXTRACT TXT TEXT
+# 18. EXTRACT TXT TEXT
 # ==================================================
 
 def extract_txt_text(file_bytes):
@@ -756,7 +1088,7 @@ def extract_txt_text(file_bytes):
 
 
 # ==================================================
-# 15. UPLOAD UNIVERSITY DOCUMENT
+# 19. UPLOAD UNIVERSITY DOCUMENT
 # ADMIN PASSWORD REQUIRED
 # ==================================================
 
@@ -768,6 +1100,7 @@ def extract_txt_text(file_bytes):
 def upload_document():
 
     if request.method == "OPTIONS":
+
         return "", 204
 
     title = request.form.get(
@@ -854,7 +1187,6 @@ def upload_document():
                 "error": "The uploaded file is empty."
             }), 400
 
-        # Extract text based on file extension.
         if extension == ".pdf":
 
             extracted_text = extract_pdf_text(
@@ -884,7 +1216,6 @@ def upload_document():
                 )
             }), 400
 
-        # Save document information and extracted text.
         new_document = Document(
             title=title,
             category=category,
@@ -940,7 +1271,7 @@ def upload_document():
 
 
 # ==================================================
-# 16. FILE SIZE ERROR
+# 20. FILE SIZE ERROR
 # ==================================================
 
 @app.errorhandler(413)
@@ -954,7 +1285,7 @@ def file_too_large(error):
 
 
 # ==================================================
-# 17. RUN THE APPLICATION
+# 21. RUN THE APPLICATION
 # ==================================================
 
 if __name__ == "__main__":
