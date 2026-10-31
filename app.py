@@ -1,11 +1,15 @@
 import os
 import re
 import hmac
+import difflib
 import threading
+
+import numpy as np
 
 from io import BytesIO
 from pathlib import Path
 from functools import wraps
+from collections import Counter
 
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
@@ -46,27 +50,41 @@ db = SQLAlchemy(app)
 
 
 # ==================================================
-# 2. SEARCH SETTINGS
+# 2. SETTINGS
 # ==================================================
 
-# Words that describe the *request*, not the topic.
+# Words that describe the REQUEST, not the TOPIC.
+# (Do not add words like "mate" or "man": they can be real topics.)
 QUESTION_FILLERS = {
     "define", "explain", "describe", "tell", "give", "show", "list",
     "please", "briefly", "meaning", "discuss", "outline", "state",
-    "elaborate", "mean", "means", "about", "bro", "bruh", "dude"
+    "elaborate", "mean", "means", "about", "whats",
+    "bro", "bruh", "dude"
 }
 
-STOP_WORDS = list(ENGLISH_STOP_WORDS | QUESTION_FILLERS)
+STOP_WORD_SET = set(ENGLISH_STOP_WORDS | QUESTION_FILLERS)
+STOP_WORDS = list(STOP_WORD_SET)
 
-# Abbreviations students use. Add your course abbreviations here.
+# Expanded ONLY when the word never appears in your documents.
 ABBREVIATIONS = {
-    "plf": "plf precision livestock farming",
+    "plf": "precision livestock farming",
 }
 
-# Below this score: no answer. Between the two: answer with low confidence.
-MINIMUM_SCORE = 0.05
-CONFIDENT_SCORE = 0.12
+CHUNK_WORDS = 120           # long sections are split into chunks this size
+MIN_BODY_WORDS = 8          # text a section needs before a new heading
+                            # may start another section
+MIN_PASSAGE_WORDS = 25      # shorter passages are scored down (floor 0.5)
+
+MINIMUM_SCORE = 0.06        # below this: no answer
+CONFIDENT_SCORE = 0.20      # at or above this: confidence = "high"
 SUGGESTION_FLOOR = 0.02
+
+HEADING_BONUS = 0.35        # question words found in a section title
+EXACT_HEADING_BONUS = 0.45  # ALL question words found in a section title
+
+# Optional: explain the retrieved text in simple English using Claude.
+# Active only when ANTHROPIC_API_KEY is set and `anthropic` is installed.
+ANSWER_MODEL = os.environ.get("ANSWER_MODEL", "claude-haiku-5-5")
 
 
 # ==================================================
@@ -132,10 +150,6 @@ class Document(db.Model):
     )
 
 
-# ==================================================
-# 5. INITIALIZE DATABASE
-# ==================================================
-
 with app.app_context():
 
     db.create_all()
@@ -148,7 +162,7 @@ with app.app_context():
 
 
 # ==================================================
-# 6. CLEAN TEXT
+# 5. TEXT HELPERS
 # ==================================================
 
 def clean_text(text):
@@ -159,20 +173,6 @@ def clean_text(text):
 
     return text.strip()
 
-
-def expand_abbreviations(text):
-
-    words = clean_text(text).split()
-
-    return " ".join(
-        ABBREVIATIONS.get(word, word)
-        for word in words
-    )
-
-
-# ==================================================
-# 7. REMOVE CONVERSATIONAL FILLERS
-# ==================================================
 
 def normalize_question(question):
 
@@ -195,8 +195,52 @@ def normalize_question(question):
     return question.strip()
 
 
+def prepare_query(text, vocabulary):
+
+    """Turn a student's question into search terms:
+    1. drop filler words ("explain", "the", "bro" ...)
+    2. keep words that exist in the documents exactly as typed
+    3. expand an abbreviation only if the documents never use it
+    4. fix likely typos using words from the documents
+    """
+
+    vocab_words = [w for w in vocabulary if " " not in w]
+
+    terms = []
+
+    for word in clean_text(text).split():
+
+        if word in STOP_WORD_SET:
+            continue
+
+        if word in vocabulary:
+            terms.append(word)
+            continue
+
+        if word in ABBREVIATIONS:
+            terms.extend(ABBREVIATIONS[word].split())
+            continue
+
+        if len(word) >= 4:
+
+            close = difflib.get_close_matches(
+                word,
+                vocab_words,
+                n=1,
+                cutoff=0.75
+            )
+
+            if close:
+                terms.append(close[0])
+                continue
+
+        terms.append(word)
+
+    return " ".join(terms)
+
+
 # ==================================================
-# 8. RECOGNIZE FOLLOW-UP INTENT
+# 6. FOLLOW-UP QUESTIONS
 # ==================================================
 
 def recognize_followup(question):
@@ -249,15 +293,7 @@ def recognize_followup(question):
     return None
 
 
-# ==================================================
-# 9. BUILD CONTEXTUAL QUESTION
-# ==================================================
-
-def build_contextual_question(
-    user_question,
-    previous_question,
-    previous_answer
-):
+def build_contextual_question(user_question, previous_question):
 
     intent = recognize_followup(user_question)
 
@@ -274,253 +310,426 @@ def build_contextual_question(
         "clarify": "definition explanation"
     }
 
-    contextual_question = (
-        previous_question + " " + intent_keywords.get(intent, "")
+    return (
+        previous_question + " " + intent_keywords.get(intent, ""),
+        intent
     )
 
-    return contextual_question, intent
+
+# ==================================================
+# 7. DOCUMENT STRUCTURE
+# A document becomes pages (slides) -> sections (a heading
+# plus its text). One section is one searchable passage.
+# ==================================================
+
+BULLET_RE = re.compile(r"^\s*(?:[•●▪◦‣\-\*–—]|\d+\s*[\.\)])")
+
+HEADING_PATTERNS = [
+    r"^scope of\b", r"^introduction to\b", r"^objectives? of\b",
+    r"^importance of\b", r"^advantages of\b", r"^disadvantages of\b",
+    r"^benefits of\b", r"^definition of\b", r"^types of\b",
+    r"^classification of\b", r"^applications? of\b",
+    r"^principles of\b", r"^components of\b", r"^challenges of\b",
+    r"^characteristics of\b", r"^functions? of\b",
+    r"^factors affecting\b", r"^methods of\b",
+    r"^conclusion\b", r"^references\b"
+]
+
+
+def is_heading(line):
+
+    text = line.strip()
+    words = text.split()
+
+    if not words or len(words) > 12:
+        return False
+
+    if BULLET_RE.match(text):
+        return False
+
+    if text[-1] in ".,;:!?":
+        return False
+
+    lowered = text.lower()
+
+    if any(re.match(pattern, lowered) for pattern in HEADING_PATTERNS):
+        return True
+
+    if text.isupper():
+        return True
+
+    return text[0].isupper() and len(words) <= 7
+
+
+def split_pages(text):
+
+    text = text or ""
+
+    if "\f" in text:
+        return [page for page in text.split("\f") if page.strip()]
+
+    return [text] if text.strip() else []
+
+
+def line_key(line):
+
+    """Normalised form used to spot running headers and footers."""
+
+    line = re.sub(r"\d+$", "", line.strip().lower())
+
+    return re.sub(r"\s+", " ", line).strip()
+
+
+def strip_running_lines(pages):
+
+    """Remove header/footer lines that repeat on many pages, e.g.
+    'INTRODUCTION TO PRECISION LIVESTOCK FARMING1'."""
+
+    if len(pages) < 3:
+        return pages
+
+    counts = Counter()
+
+    for page in pages:
+
+        keys = {
+            line_key(line)
+            for line in page.splitlines()
+            if line.strip()
+        }
+
+        counts.update(key for key in keys if key)
+
+    threshold = max(3, int(len(pages) * 0.4))
+
+    repeated = {
+        key for key, count in counts.items()
+        if count >= threshold
+    }
+
+    cleaned_pages = []
+
+    for page in pages:
+
+        kept = [
+            line for line in page.splitlines()
+            if line.strip() and line_key(line) not in repeated
+        ]
+
+        cleaned_pages.append("\n".join(kept))
+
+    return cleaned_pages
+
+
+def split_page_into_sections(page):
+
+    """Returns a list of (heading, [lines])."""
+
+    lines = [line.strip() for line in page.splitlines() if line.strip()]
+
+    sections = []
+    current_heading = ""
+    current_lines = []
+    body_words = 0
+
+    for line in lines:
+
+        heading_like = is_heading(line)
+
+        if heading_like and current_lines and body_words >= MIN_BODY_WORDS:
+
+            sections.append((current_heading, current_lines))
+
+            current_heading = line
+            current_lines = [line]
+            body_words = 0
+            continue
+
+        if heading_like and not current_heading:
+            current_heading = line
+
+        if not heading_like:
+            body_words += len(line.split())
+
+        current_lines.append(line)
+
+    if current_lines:
+        sections.append((current_heading, current_lines))
+
+    return sections
+
+
+def chunk_lines(lines, size):
+
+    """Group lines into chunks of at most `size` words."""
+
+    chunks = []
+    current = []
+    count = 0
+
+    for line in lines:
+
+        words = line.split()
+
+        pieces = [
+            " ".join(words[i:i + size])
+            for i in range(0, len(words), size)
+        ] or [line]
+
+        for piece in pieces:
+
+            n = len(piece.split())
+
+            if current and count + n > size:
+                chunks.append(current)
+                current = []
+                count = 0
+
+            current.append(piece)
+            count += n
+
+    if current:
+        chunks.append(current)
+
+    return chunks
 
 
 # ==================================================
-# 10. SPLIT DOCUMENTS INTO PASSAGES
-# Splits on slide/page breaks (blank lines) first, then
-# groups whole lines up to chunk_size words, so passages
-# do not cross slide boundaries.
+# 8. SEARCH INDEX (no database access in this section)
 # ==================================================
 
-def split_into_passages(
-    text,
-    chunk_size=110,
-    overlap=30
-):
+def make_index(rows):
 
-    if chunk_size <= 0 or overlap < 0 or overlap >= chunk_size:
-        raise ValueError("Invalid passage chunk size or overlap.")
+    """rows: list of dicts with id, title, category, text."""
 
-    blocks = [
-        block for block in re.split(r"\n\s*\n", text or "")
-        if block.strip()
-    ]
+    sections = []
 
-    passages = []
+    for row in rows:
 
-    for block in blocks:
+        pages = strip_running_lines(split_pages(row["text"]))
 
-        # Break the block into line-sized units.
-        units = []
+        for page_number, page in enumerate(pages, start=1):
 
-        for line in block.splitlines():
+            for heading, lines in split_page_into_sections(page):
 
-            words = line.split()
+                heading = heading or (lines[0] if lines else "")
 
-            if not words:
-                continue
+                heading_terms = (
+                    set(clean_text(heading).split()) - STOP_WORD_SET
+                )
 
-            for i in range(0, len(words), chunk_size):
-                units.append(" ".join(words[i:i + chunk_size]))
+                for position, chunk in enumerate(
+                    chunk_lines(lines, CHUNK_WORDS)
+                ):
 
-        current = []
-        count = 0
+                    text = "\n".join(chunk)
 
-        for unit in units:
-
-            unit_count = len(unit.split())
-
-            if current and count + unit_count > chunk_size:
-
-                passages.append("\n".join(current))
-
-                # Carry the last few lines over as overlap.
-                tail = []
-                tail_count = 0
-
-                for previous in reversed(current):
-
-                    previous_count = len(previous.split())
-
-                    if tail_count + previous_count > overlap:
-                        break
-
-                    tail.insert(0, previous)
-                    tail_count += previous_count
-
-                current = tail
-                count = tail_count
-
-            current.append(unit)
-            count += unit_count
-
-        if current:
-            passages.append("\n".join(current))
-
-    return passages
-
-
-# ==================================================
-# 11. CACHED DOCUMENT INDEX
-# The index is built from passages only (the question is
-# never part of the fit) and rebuilt only when documents
-# change.
-# ==================================================
-
-_index = {
-    "key": None,
-    "vectorizer": None,
-    "matrix": None,
-    "passages": []
-}
-
-_index_lock = threading.Lock()
-
-
-def invalidate_index():
-
-    with _index_lock:
-        _index["key"] = None
-
-
-def build_index():
-
-    with _index_lock:
-
-        documents = Document.query.order_by(Document.id).all()
-
-        key = (
-            len(documents),
-            max((d.id for d in documents), default=0)
-        )
-
-        if _index["key"] == key:
-            return _index
-
-        passages = []
-
-        for document in documents:
-
-            for number, passage in enumerate(
-                split_into_passages(document.extracted_text)
-            ):
-
-                cleaned = clean_text(passage)
-
-                if cleaned:
-                    passages.append({
-                        "document_id": document.id,
-                        "title": document.title,
-                        "category": document.category,
-                        "passage_number": number + 1,
-                        "text": passage,
-                        "cleaned_text": cleaned
+                    sections.append({
+                        "document_id": row["id"],
+                        "title": row["title"],
+                        "category": row["category"],
+                        "page": page_number,
+                        "heading": heading,
+                        "text": text,
+                        "continued": position > 0,
+                        "heading_terms": heading_terms,
+                        "search_text": clean_text(heading + " " + text)
                     })
 
-        vectorizer = None
-        matrix = None
+    index = {
+        "sections": sections,
+        "vectorizer": None,
+        "matrix": None,
+        "length_factor": None
+    }
 
-        if passages:
-            try:
-                vectorizer = TfidfVectorizer(
-                    stop_words=STOP_WORDS,
-                    ngram_range=(1, 2),
-                    sublinear_tf=True
-                )
-                matrix = vectorizer.fit_transform(
-                    [p["cleaned_text"] for p in passages]
-                )
-            except ValueError:
-                vectorizer = None
-                matrix = None
+    if not sections:
+        return index
 
-        _index.update(
-            key=key,
-            vectorizer=vectorizer,
-            matrix=matrix,
-            passages=passages
+    try:
+
+        vectorizer = TfidfVectorizer(
+            stop_words=STOP_WORDS,
+            ngram_range=(1, 2),
+            sublinear_tf=True
         )
 
-        return _index
+        matrix = vectorizer.fit_transform(
+            [section["search_text"] for section in sections]
+        )
+
+    except ValueError:
+        app.logger.warning("Could not build the document search index.")
+        return index
+
+    index["vectorizer"] = vectorizer
+    index["matrix"] = matrix
+    index["length_factor"] = np.array([
+        min(
+            1.0,
+            max(0.5, len(section["text"].split()) / MIN_PASSAGE_WORDS)
+        )
+        for section in sections
+    ])
+
+    return index
 
 
-# ==================================================
-# 12. SEARCH UNIVERSITY DOCUMENTS
-# Returns {"best": match or None, "suggestions": [...]}
-# ==================================================
+def query_index(index, question):
 
-def search_documents(user_question):
+    """Returns {"best": section or None, "suggestions": [...]}."""
 
     empty = {"best": None, "suggestions": []}
 
-    index = build_index()
-
-    if not index["passages"] or index["vectorizer"] is None:
+    if index["vectorizer"] is None:
         return empty
 
-    question = expand_abbreviations(user_question)
+    terms = prepare_query(question, index["vectorizer"].vocabulary_)
 
-    if not question:
+    if not terms:
         return empty
 
-    question_vector = index["vectorizer"].transform([question])
+    question_vector = index["vectorizer"].transform([terms])
 
-    # None of the question's words exist in any document.
     if question_vector.nnz == 0:
         return empty
 
-    similarities = cosine_similarity(
+    term_set = set(terms.split())
+
+    tfidf_scores = cosine_similarity(
         question_vector,
         index["matrix"]
     ).flatten()
 
-    ranked = similarities.argsort()[::-1]
+    sections = index["sections"]
 
+    scores = np.zeros(len(sections))
+
+    for i, section in enumerate(sections):
+
+        heading_terms = section["heading_terms"]
+
+        heading_share = len(term_set & heading_terms) / len(term_set)
+
+        exact_heading = (
+            1.0 if heading_terms and term_set <= heading_terms else 0.0
+        )
+
+        scores[i] = (
+            tfidf_scores[i]
+            + HEADING_BONUS * heading_share
+            + EXACT_HEADING_BONUS * exact_heading
+        ) * index["length_factor"][i]
+
+    ranked = scores.argsort()[::-1]
     best_index = int(ranked[0])
-    best_score = float(similarities[best_index])
+    best_score = float(scores[best_index])
 
+    # Nothing relevant enough: offer the closest sections instead.
     if best_score < MINIMUM_SCORE:
 
         suggestions = []
 
         for i in ranked[:3]:
 
-            score = float(similarities[int(i)])
+            score = float(scores[int(i)])
 
             if score < SUGGESTION_FLOOR:
                 break
 
-            item = index["passages"][int(i)]
+            item = sections[int(i)]
 
             suggestions.append({
                 "document_title": item["title"],
-                "passage_number": item["passage_number"],
+                "page": item["page"],
+                "heading": item["heading"],
                 "similarity": round(score, 4),
                 "preview": item["text"][:300]
             })
 
         return {"best": None, "suggestions": suggestions}
 
-    best = index["passages"][best_index].copy()
+    best = dict(sections[best_index])
     best["similarity"] = round(best_score, 4)
-    best["confidence"] = (
-        "high" if best_score >= CONFIDENT_SCORE else "low"
-    )
+    best["confidence"] = "high" if best_score >= CONFIDENT_SCORE else "low"
 
-    # Attach the next passage from the same document so lists
-    # that run past the chunk boundary are not cut off.
-    best["next_text"] = None
+    # A long section was split into chunks: add the following ones.
+    answer_parts = [best["text"]]
 
     next_index = best_index + 1
 
-    if next_index < len(index["passages"]):
+    while (
+        next_index < len(sections)
+        and len(answer_parts) < 3
+        and sections[next_index]["continued"]
+        and sections[next_index]["document_id"] == best["document_id"]
+        and sections[next_index]["page"] == best["page"]
+        and sections[next_index]["heading"] == best["heading"]
+    ):
+        answer_parts.append(sections[next_index]["text"])
+        next_index += 1
 
-        following = index["passages"][next_index]
-
-        if following["document_id"] == best["document_id"]:
-            best["next_text"] = following["text"]
+    best["answer_text"] = "\n".join(answer_parts)
 
     return {"best": best, "suggestions": []}
 
 
 # ==================================================
-# 13. SEARCH KNOWLEDGE DATABASE
+# 9. DATABASE-BACKED INDEX (cached)
+# ==================================================
+
+_index_cache = {"key": None, "index": None}
+_index_lock = threading.Lock()
+
+
+def invalidate_index():
+
+    with _index_lock:
+        _index_cache["key"] = None
+        _index_cache["index"] = None
+
+
+def get_index():
+
+    with _index_lock:
+
+        # Cheap check first: never load document text on every request.
+        count, latest_id = db.session.query(
+            db.func.count(Document.id),
+            db.func.max(Document.id)
+        ).one()
+
+        key = (count, latest_id or 0)
+
+        if (
+            _index_cache["key"] == key
+            and _index_cache["index"] is not None
+        ):
+            return _index_cache["index"]
+
+        rows = [
+            {
+                "id": document.id,
+                "title": document.title,
+                "category": document.category,
+                "text": document.extracted_text
+            }
+            for document in Document.query.order_by(Document.id).all()
+        ]
+
+        _index_cache["index"] = make_index(rows)
+        _index_cache["key"] = key
+
+        return _index_cache["index"]
+
+
+def search_documents(user_question):
+
+    return query_index(get_index(), user_question)
+
+
+# ==================================================
+# 10. SEARCH KNOWLEDGE DATABASE
 # ==================================================
 
 def search_knowledge(user_question):
@@ -563,7 +772,60 @@ def search_knowledge(user_question):
 
 
 # ==================================================
-# 14. HOME ROUTE
+# 11. OPTIONAL: EXPLAIN THE RETRIEVED TEXT WITH CLAUDE
+# Uses ONLY the retrieved course text. If anything fails,
+# the app falls back to showing the original excerpt.
+# ==================================================
+
+EXPLAIN_SYSTEM_PROMPT = (
+    "You are Eger AI, a study assistant for Egerton University students. "
+    "Answer the student's question using ONLY the course material provided. "
+    "If the material does not answer the question, say so briefly. "
+    "Explain clearly in simple English. Use short bullet points when the "
+    "material is a list. Do not add facts that are not in the material."
+)
+
+
+def generate_explanation(question, excerpt, document_title):
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+
+    try:
+
+        import anthropic
+
+        client = anthropic.Anthropic(timeout=20.0)
+
+        response = client.messages.create(
+            model=ANSWER_MODEL,
+            max_tokens=600,
+            system=EXPLAIN_SYSTEM_PROMPT,
+            messages=[{
+                "role": "user",
+                "content": (
+                    "Course material (" + document_title + "):\n"
+                    + excerpt
+                    + "\n\nStudent question: " + question
+                )
+            }]
+        )
+
+        text = "".join(
+            block.text for block in response.content
+            if getattr(block, "type", "") == "text"
+        ).strip()
+
+        return text or None
+
+    except Exception:
+
+        app.logger.exception("Explanation generation failed.")
+        return None
+
+
+# ==================================================
+# 12. HOME ROUTE
 # ==================================================
 
 @app.route("/", methods=["GET"])
@@ -572,13 +834,15 @@ def home():
     return jsonify({
         "message": "Eger AI Flask server is working!",
         "status": "online",
-        "document_search": "TF-IDF + cosine similarity (cached index)",
+        "document_search": (
+            "section-aware TF-IDF + heading matching + typo correction"
+        ),
         "conversation_memory": "enabled"
     })
 
 
 # ==================================================
-# 15. ASK EGER AI
+# 13. ASK EGER AI
 # ==================================================
 
 @app.route("/ask", methods=["POST", "OPTIONS"])
@@ -592,8 +856,6 @@ def ask():
     user_question = data.get("question", "")
     previous_question = data.get("previousQuestion", "")
     previous_answer = data.get("previousAnswer", "")
-
-    # A. VALIDATE INPUT
 
     if not isinstance(user_question, str):
         return jsonify({"error": "Question must be text."}), 400
@@ -609,57 +871,60 @@ def ask():
     if not user_question:
         return jsonify({"error": "Please provide a question."}), 400
 
-    # B. NORMALIZE QUESTION
-
-    normalized_question = normalize_question(user_question)
-
-    if not normalized_question:
-        normalized_question = user_question
-
-    # C. RECOGNIZE FOLLOW-UP
+    normalized_question = normalize_question(user_question) or user_question
 
     contextual_question, followup_intent = build_contextual_question(
         normalized_question,
-        previous_question,
-        previous_answer
+        previous_question
     )
 
     is_followup = followup_intent is not None
 
-    # D. SEARCH DOCUMENTS
+    # ---- A. Search the uploaded documents
 
     search = search_documents(contextual_question)
     best = search["best"]
 
     app.logger.info(
-        "Question: %s | Follow-up: %s | Best score: %s",
+        "Question: %s | Follow-up: %s | Score: %s | Section: %s",
         normalized_question,
         followup_intent,
-        best["similarity"] if best else None
+        best["similarity"] if best else None,
+        best["heading"] if best else None
     )
 
     if best:
 
-        answer = best["text"]
+        excerpt = best["answer_text"]
 
-        if best["next_text"]:
-            answer = answer + "\n\n" + best["next_text"]
+        generated = generate_explanation(
+            normalized_question,
+            excerpt,
+            best["title"]
+        )
 
-        return jsonify({
-            "answer": answer,
+        response = {
+            "answer": generated or excerpt,
+            "answer_type": "generated" if generated else "excerpt",
             "status": "success",
             "source": "document",
             "document_id": best["document_id"],
             "document_title": best["title"],
             "category": best["category"],
-            "passage_number": best["passage_number"],
+            "page": best["page"],
+            "section": best["heading"],
             "similarity": best["similarity"],
             "confidence": best["confidence"],
             "followup": is_followup,
             "intent": followup_intent
-        })
+        }
 
-    # E. SEARCH KNOWLEDGE DATABASE
+        if generated:
+            response["excerpt"] = excerpt
+
+        return jsonify(response)
+
+    # ---- B. Search the knowledge database
 
     knowledge_result = search_knowledge(contextual_question)
 
@@ -673,27 +938,26 @@ def ask():
             "intent": followup_intent
         })
 
-    # F. PREVIOUS ANSWER FALLBACK
+    # ---- C. Follow-up with nothing new: reuse the previous answer
 
     if is_followup and previous_answer:
 
         fallback_messages = {
             "simplify": (
-                "I don't have another passage to simplify "
-                "right now. Here is the explanation I found:"
+                "I don't have another passage to simplify. "
+                "Here is the explanation I found:"
             ),
             "examples": (
                 "I couldn't find a separate examples section. "
                 "Here is the information available:"
             ),
             "explain": (
-                "I couldn't find additional information "
-                "in the uploaded documents. Here is the "
-                "previous explanation:"
+                "I couldn't find additional information in the "
+                "uploaded documents. Here is the previous explanation:"
             ),
             "why": (
-                "I couldn't find further information "
-                "explaining why. Here is the previous answer:"
+                "I couldn't find further information explaining why. "
+                "Here is the previous answer:"
             ),
             "continue": (
                 "I couldn't find another relevant passage. "
@@ -722,25 +986,25 @@ def ask():
             "intent": followup_intent
         })
 
-    # G. NO ANSWER FOUND (with closest passages, if any)
+    # ---- D. Nothing found (return the closest sections, if any)
 
     return jsonify({
         "answer": (
-            "I'm sorry, I couldn't find a sufficiently "
-            "relevant answer in the university documents "
-            "or knowledge base. Please try different "
-            "wording or contact the relevant Egerton "
+            "I'm sorry, I couldn't find a sufficiently relevant answer "
+            "in the university documents or knowledge base. Please try "
+            "different wording or contact the relevant Egerton "
             "University office."
         ),
         "status": "not_found",
         "source": None,
-        "followup": False,
+        "followup": is_followup,
+        "intent": followup_intent,
         "suggestions": search["suggestions"]
     })
 
 
 # ==================================================
-# 16. ADD KNOWLEDGE (ADMIN PASSWORD REQUIRED)
+# 14. ADD KNOWLEDGE (ADMIN PASSWORD REQUIRED)
 # ==================================================
 
 @app.route("/add", methods=["POST", "OPTIONS"])
@@ -806,9 +1070,9 @@ def add_knowledge():
 
 
 # ==================================================
-# 17. TEXT EXTRACTION
-# Pages are joined with a blank line so the passage
-# splitter can respect slide/page boundaries.
+# 15. TEXT EXTRACTION
+# PDF pages are joined with a form-feed character so the
+# search index knows where each slide/page starts and ends.
 # ==================================================
 
 def extract_pdf_text(file_bytes):
@@ -818,28 +1082,31 @@ def extract_pdf_text(file_bytes):
     if pdf.is_encrypted:
         raise ValueError("This PDF is password-protected.")
 
-    extracted_pages = []
+    pages = []
 
     for page in pdf.pages:
 
         page_text = page.extract_text() or ""
 
-        if page_text.strip():
-            extracted_pages.append(page_text.strip())
+        # pypdf inserts blank lines inside a page; remove them.
+        page_text = re.sub(r"\n\s*\n+", "\n", page_text.strip())
 
-    return "\n\n".join(extracted_pages)
+        if page_text:
+            pages.append(page_text)
+
+    return "\f".join(pages)
 
 
 def extract_docx_text(file_bytes):
 
     document = WordDocument(BytesIO(file_bytes))
 
-    extracted_parts = []
+    parts = []
 
     for paragraph in document.paragraphs:
 
         if paragraph.text.strip():
-            extracted_parts.append(paragraph.text)
+            parts.append(paragraph.text)
 
     for table in document.tables:
 
@@ -850,9 +1117,9 @@ def extract_docx_text(file_bytes):
             )
 
             if row_text.strip():
-                extracted_parts.append(row_text)
+                parts.append(row_text)
 
-    return "\n".join(extracted_parts)
+    return "\n".join(parts)
 
 
 def extract_txt_text(file_bytes):
@@ -861,7 +1128,7 @@ def extract_txt_text(file_bytes):
 
 
 # ==================================================
-# 18. UPLOAD UNIVERSITY DOCUMENT (ADMIN PASSWORD REQUIRED)
+# 16. UPLOAD UNIVERSITY DOCUMENT (ADMIN PASSWORD REQUIRED)
 # ==================================================
 
 @app.route("/upload", methods=["POST", "OPTIONS"])
@@ -936,7 +1203,6 @@ def upload_document():
         db.session.add(new_document)
         db.session.commit()
 
-        # Make the new document searchable immediately.
         invalidate_index()
 
         return jsonify({
@@ -967,7 +1233,7 @@ def upload_document():
 
 
 # ==================================================
-# 19. FILE SIZE ERROR
+# 17. FILE SIZE ERROR
 # ==================================================
 
 @app.errorhandler(413)
@@ -979,7 +1245,7 @@ def file_too_large(error):
 
 
 # ==================================================
-# 20. RUN THE APPLICATION
+# 18. RUN THE APPLICATION
 # ==================================================
 
 if __name__ == "__main__":
