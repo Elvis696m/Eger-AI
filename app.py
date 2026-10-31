@@ -224,11 +224,10 @@ def normalize_question(question):
     question = str(question or "").strip()
 
     # Remove common forms of address at the beginning.
-    # Only removes them when they are being used as
-    # conversational fillers.
+    # Supports bro, broo, brooo, bruh and similar variations.
 
     question = re.sub(
-        r"^(bro|bruh|dude|mate|man|girl|bitch)\b[\s,!?]*",
+        r"^(bro+|bruh+|dude|mate|man)[\s,!?]*",
         "",
         question,
         flags=re.IGNORECASE
@@ -237,7 +236,7 @@ def normalize_question(question):
     # Remove common forms of address at the end.
 
     question = re.sub(
-        r"[\s,!?]+\b(bro|bruh|dude|mate|man)\b[.!?]*$",
+        r"[\s,!?]+\b(bro+|bruh+|dude|mate|man)\b[.!?]*$",
         "",
         question,
         flags=re.IGNORECASE
@@ -259,25 +258,29 @@ def recognize_followup(question):
         "simplify": [
             "simplify",
             "simplify that",
-            "in simple english",
-            "explain simply",
+            "simplify it",
             "make it simple",
             "make it easier",
+            "explain simply",
+            "in simple english",
             "easy english"
         ],
 
         "examples": [
-            "give examples",
             "examples",
+            "give examples",
             "some examples",
             "show examples",
-            "example please"
+            "example please",
+            "give me examples"
         ],
 
         "explain": [
-            "explain",
             "explain that",
+            "explain it",
+            "explain further",
             "elaborate",
+            "elaborate on that",
             "tell me more",
             "more details",
             "go deeper",
@@ -302,12 +305,13 @@ def recognize_followup(question):
             "summarize",
             "summarise",
             "short summary",
-            "briefly explain",
+            "summarize that",
             "summarise that"
         ],
 
         "clarify": [
             "what do you mean",
+            "what do you mean by that",
             "what does that mean",
             "clarify",
             "i dont understand",
@@ -318,15 +322,9 @@ def recognize_followup(question):
 
     for intent, phrases in followup_patterns.items():
 
-        for phrase in phrases:
+        if cleaned in phrases:
 
-            if cleaned == phrase:
-
-                return intent
-
-            if cleaned.startswith(phrase + " "):
-
-                return intent
+            return intent
 
     return None
 
