@@ -1,7 +1,9 @@
 Flask
+Flask-CORS
 Flask-SQLAlchemy
-Flask-Cors
 gunicorn
+numpy
 pypdf
 python-docx
+rank-bm25
 scikit-learn
